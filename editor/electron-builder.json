@@ -1,0 +1,44 @@
+{
+  "appId": "com.objector.app",
+  "productName": "Objector",
+  "directories": {
+    "output": "E:/ObjectScratch-dist"
+  },
+  "asar": true,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "zip",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "Objector2.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "installerIcon": "Objector2.ico",
+    "uninstallerIcon": "Objector2.ico",
+    "installerHeaderIcon": "Objector2.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Objector",
+    "artifactName": "Objector-Setup-${version}.${ext}",
+    "include": "installer.nsh"
+  },
+  "linux": {
+    "target": [
+      {
+        "target": "tar.gz",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "Objector2.png",
+    "category": "Development"
+  }
+}

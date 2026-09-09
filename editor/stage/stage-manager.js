@@ -72,13 +72,22 @@ const StageManager = (function () {
   }
 
   function removeSprite(idx) {
-    if (_sprites.length <= 1) return;
+    if (_sprites.length <= 1) return false;
+    if (idx < 0 || idx >= _sprites.length) return false;
+    // ★ 先保存当前角色的积木数据，再删除
+    if (!_isExecuting && typeof EditorState !== 'undefined') {
+      _sprites[_activeIdx].blocks = { ...(EditorState.blocks || {}) };
+    }
     _sprites.splice(idx, 1);
+    // 调整 activeIdx
     if (_activeIdx >= _sprites.length) _activeIdx = _sprites.length - 1;
-    if (typeof EditorState !== 'undefined') {
-      EditorState.blocks = _sprites[_activeIdx].blocks || {};
+    if (_activeIdx === idx && _activeIdx > 0) _activeIdx = idx - 1;
+    // 切换到新 activeIdx 的积木（深拷贝避免引用问题）
+    if (!_isExecuting && typeof EditorState !== 'undefined') {
+      EditorState.blocks = { ...(_sprites[_activeIdx].blocks || {}) };
     }
     renderSpriteList();
+    return true;
   }
 
   function renderSpriteList() {
@@ -115,12 +124,10 @@ const StageManager = (function () {
           renderSpriteList();
         }
       });
-      // 右键删除
+      // 右键菜单
       div.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (_sprites.length > 1 && confirm(`删除精灵 "${s.name}"？`)) {
-          removeSprite(i);
-        }
+        _showSpriteContextMenu(e.clientX, e.clientY, i);
       });
       list.appendChild(div);
     });
@@ -525,6 +532,143 @@ const StageManager = (function () {
     if (!nodeId) return null;
     syncFromSceneGraph();
     return nodeId;
+  }
+
+  /** 显示角色右键菜单 */
+  function _showSpriteContextMenu(x, y, spriteIdx) {
+    // 移除旧菜单
+    const old = document.getElementById('sprite-context-menu');
+    if (old) old.remove();
+
+    const sprite = _sprites[spriteIdx];
+    if (!sprite) return;
+
+    const menu = document.createElement('div');
+    menu.id = 'sprite-context-menu';
+    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:10000;
+      background:var(--bg-surface);border:1px solid var(--border);border-radius:6px;
+      padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:140px;font-size:13px;`;
+
+    const items = [
+      { label: '✏️ 重命名', action: 'rename' },
+      { label: '📋 复制角色', action: 'clone' },
+      { divider: true },
+      { label: '📍 设置位置', action: 'setpos' },
+      { label: '🔄 设置方向', action: 'setdir' },
+      { label: '📏 设置大小', action: 'setsize' },
+      { divider: true },
+      { label: sprite.visible ? '👁️ 隐藏' : '👁️ 显示', action: 'togglevisible' },
+      { divider: true },
+      { label: '🗑️ 删除角色', action: 'delete', danger: true },
+    ];
+
+    items.forEach(item => {
+      if (item.divider) {
+        const hr = document.createElement('div');
+        hr.style.cssText = 'height:1px;background:var(--border);margin:4px 0;';
+        menu.appendChild(hr);
+        return;
+      }
+      const div = document.createElement('div');
+      div.style.cssText = `padding:6px 16px;cursor:pointer;transition:background .15s;
+        ${item.danger ? 'color:var(--red);' : 'color:var(--text);'}`;
+      div.textContent = item.label;
+      div.addEventListener('mouseenter', () => div.style.background = 'var(--bg-hover)');
+      div.addEventListener('mouseleave', () => div.style.background = 'transparent');
+      div.addEventListener('click', async () => {
+        menu.remove();
+        await _handleSpriteAction(item.action, spriteIdx);
+      });
+      menu.appendChild(div);
+    });
+
+    document.body.appendChild(menu);
+
+    // 边界检测
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (x - rect.width) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (y - rect.height) + 'px';
+
+    // 点击其他地方关闭
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('mousedown', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 10);
+  }
+
+  /** 处理角色菜单操作 */
+  async function _handleSpriteAction(action, idx) {
+    const sprite = _sprites[idx];
+    if (!sprite) return;
+
+    switch (action) {
+      case 'rename': {
+        const newName = typeof showCustomPrompt === 'function'
+          ? await showCustomPrompt('重命名角色:', sprite.name)
+          : prompt('重命名角色:', sprite.name);
+        if (newName && newName.trim()) {
+          sprite.name = newName.trim();
+          renderSpriteList();
+        }
+        break;
+      }
+      case 'clone': {
+        const cloneIdx = cloneSprite(idx);
+        if (cloneIdx !== null) {
+          setActiveSprite(cloneIdx);
+        }
+        break;
+      }
+      case 'setpos': {
+        const pos = typeof showCustomPrompt === 'function'
+          ? await showCustomPrompt('设置位置 (x,y):', `${Math.round(sprite.x)},${Math.round(sprite.y)}`)
+          : prompt('设置位置 (x,y):', `${Math.round(sprite.x)},${Math.round(sprite.y)}`);
+        if (pos) {
+          const [px, py] = pos.split(',').map(v => parseFloat(v.trim()));
+          if (!isNaN(px)) sprite.x = px;
+          if (!isNaN(py)) sprite.y = py;
+        }
+        break;
+      }
+      case 'setdir': {
+        const dir = typeof showCustomPrompt === 'function'
+          ? await showCustomPrompt('设置方向 (0-360):', String(sprite.direction))
+          : prompt('设置方向 (0-360):', String(sprite.direction));
+        if (dir !== null) {
+          const d = parseFloat(dir);
+          if (!isNaN(d)) sprite.direction = d;
+        }
+        break;
+      }
+      case 'setsize': {
+        const size = typeof showCustomPrompt === 'function'
+          ? await showCustomPrompt('设置大小 (百分比):', String(sprite.size))
+          : prompt('设置大小 (百分比):', String(sprite.size));
+        if (size !== null) {
+          const s = parseFloat(size);
+          if (!isNaN(s) && s > 0) sprite.size = s;
+        }
+        break;
+      }
+      case 'togglevisible': {
+        sprite.visible = !sprite.visible;
+        renderSpriteList();
+        break;
+      }
+      case 'delete': {
+        if (_sprites.length <= 1) {
+          alert('不能删除最后一个角色');
+          return;
+        }
+        if (confirm(`确定删除角色 "${sprite.name}" 吗？`)) {
+          removeSprite(idx);
+        }
+        break;
+      }
+    }
   }
 
   return {

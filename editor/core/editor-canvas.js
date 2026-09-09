@@ -9,9 +9,11 @@ const EditorCanvas = (function () {
   let panning = false, panStart = { x: 0, y: 0 };
   let spaceDown = false; // 空格键按下 = 拖拽模式
   let selectedBlock = null;
+  let selectedBlocks = []; // 多选积木 ID 列表
   let hoveredPort = null;
   let dragLine = null; // { fromBlockId, fromPort, mx, my }
   let paramEditorState = null; // { blockId, paramName, inputEl }
+  let _clipboard = null; // 剪贴板：{ blocks: {}, connections: [] }
 
 
   // 全局状态
@@ -19,7 +21,7 @@ const EditorCanvas = (function () {
     blocks: {},        // id -> block instance
     running: false,
     projectPath: null,
-    projectName: '未命名项目',
+    projectName: 'Unknown Project',
   };
 
   function init() {
@@ -74,12 +76,39 @@ const EditorCanvas = (function () {
     render();
   }
 
+  /** 获取可见视口的世界坐标范围（用于虚拟化渲染） */
+  function _getViewportBounds() {
+    const padding = 100; // 额外渲染边距，避免滚动时闪烁
+    const cw = canvas.width / dpr;
+    const ch = canvas.height / dpr;
+    return {
+      left: -offsetX / scale - padding,
+      top: -offsetY / scale - padding,
+      right: (cw - offsetX) / scale + padding,
+      bottom: (ch - offsetY) / scale + padding,
+    };
+  }
+
+  /** 检查积木是否在可见视口内 */
+  function _isBlockVisible(block, bounds) {
+    if (!block) return false;
+    const sz = BlockRenderer.measureBlock(block);
+    const bx = block.x;
+    const by = block.y;
+    const bw = sz.w || 120;
+    const bh = sz.h || 40;
+    return !(bx + bw < bounds.left || bx > bounds.right || by + bh < bounds.top || by > bounds.bottom);
+  }
+
   function render() {
     if (!ctx) return;
     try {
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+    // 获取可见视口范围（虚拟化渲染优化）
+    const vpBounds = _getViewportBounds();
 
     // 网格
     ctx.save();
@@ -92,9 +121,8 @@ const EditorCanvas = (function () {
     const drawn = new Set();
     function drawBlockWithSubs(blk) {
       if (drawn.has(blk.id)) return;
-      // 折叠状态：跳过整个链的后续积木
-      if (typeof DevMode !== 'undefined' && DevMode.isCollapsed(blk.id)) {
-        BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id, hoveredPort);
+      // 虚拟化渲染：跳过不在视口内的积木
+      if (!_isBlockVisible(blk, vpBounds)) {
         drawn.add(blk.id);
         // 跳过整条链
         let cur = blk.flowOut;
@@ -104,7 +132,19 @@ const EditorCanvas = (function () {
         }
         return;
       }
-      BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id, hoveredPort);
+      // 折叠状态：跳过整个链的后续积木
+      if (typeof DevMode !== 'undefined' && DevMode.isCollapsed(blk.id)) {
+        BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
+        drawn.add(blk.id);
+        // 跳过整条链
+        let cur = blk.flowOut;
+        while (cur && EditorState.blocks[cur]) {
+          drawn.add(cur);
+          cur = EditorState.blocks[cur].flowOut;
+        }
+        return;
+      }
+      BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
       drawn.add(blk.id);
       // 绘制 C 型槽子积木链（子积木保持原位，在各自位置绘制）
       if (blk.subBlocks) {
@@ -398,7 +438,31 @@ const EditorCanvas = (function () {
 
     const block = findBlockAt(w.x, w.y);
     if (block) {
+      // Shift+点击 = 多选（切换选中状态）
+      if (e.shiftKey) {
+        const idx = selectedBlocks.indexOf(block.id);
+        if (idx >= 0) {
+          selectedBlocks.splice(idx, 1);
+        } else {
+          selectedBlocks.push(block.id);
+        }
+        selectedBlock = block.id;
+        // 收集多选积木进行拖拽
+        const chainIds = selectedBlocks.length > 0 ? [...selectedBlocks] : [block.id];
+        const positions = {};
+        chainIds.forEach(id => {
+          const b = EditorState.blocks[id];
+          if (b) positions[id] = { x: b.x, y: b.y };
+        });
+        dragging = {
+          blockId: block.id, offX: w.x - block.x, offY: w.y - block.y,
+          chainIds, startWx: w.x, startWy: w.y, positions,
+        };
+        return;
+      }
+
       selectedBlock = block.id;
+      selectedBlocks = []; // 普通点击清除多选
 
       // 检查是否点击在参数插槽上 —— 不启动拖拽，等待可能的双击编辑
       const slots = BlockRenderer.getParamSlots(block);
@@ -422,16 +486,12 @@ const EditorCanvas = (function () {
         }
       }
 
-      // 收集拖拽链：默认拖动整个链，Shift 只拖单个
+      // 收集拖拽链：默认拖动整个链
       let chainIds = [];
-      if (!e.shiftKey) {
-        let cur = block;
-        while (cur) {
-          chainIds.push(cur.id);
-          cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
-        }
-      } else {
-        chainIds = [block.id];
+      let cur = block;
+      while (cur) {
+        chainIds.push(cur.id);
+        cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
       }
 
       const positions = {};
@@ -445,8 +505,9 @@ const EditorCanvas = (function () {
         chainIds, startWx: w.x, startWy: w.y, positions,
       };
     } else {
-      // 点击空白区域 → 拖拽画布
+      // 点击空白区域 → 清除多选 + 拖拽画布
       selectedBlock = null;
+      selectedBlocks = [];
       panning = true;
       panStart = { x: e.clientX - offsetX, y: e.clientY - offsetY };
       canvas.style.cursor = 'grabbing';
@@ -662,20 +723,78 @@ const EditorCanvas = (function () {
   }
 
   function onKeyDown(e) {
+    // 确保焦点在画布上（不是输入框）
+    if (e.target !== document.body && e.target !== canvas && e.target?.tagName !== 'CANVAS') return;
+    
     if (e.key === 'Delete' && selectedBlock) {
-      deleteBlock(selectedBlock);
-      selectedBlock = null;
+      // 多选删除：删除所有选中的积木
+      if (selectedBlocks.length > 0) {
+        selectedBlocks.forEach(id => deleteBlock(id));
+        selectedBlocks = [];
+        selectedBlock = null;
+      } else {
+        deleteBlock(selectedBlock);
+        selectedBlock = null;
+      }
     }
     // Ctrl+T = 跳转到重要代码
-    if (e.key === 't' && e.ctrlKey && e.target === document.body) {
+    if (e.key === 't' && e.ctrlKey && !e.shiftKey) {
       e.preventDefault();
       showGotoLabelDialog();
+    }
+    // Ctrl+C = 复制选中的积木
+    if (e.key === 'c' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      _copySelectedBlocks();
+    }
+    // Ctrl+V = 粘贴积木
+    if (e.key === 'v' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      _pasteBlocks();
+    }
+    // Ctrl+X = 剪切选中的积木
+    if (e.key === 'x' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      _copySelectedBlocks();
+      if (selectedBlock) {
+        deleteBlock(selectedBlock);
+        selectedBlock = null;
+      }
+    }
+    // Ctrl+A = 全选积木
+    if (e.key === 'a' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      selectedBlocks = Object.keys(EditorState.blocks);
+      render();
+    }
+    // Ctrl+D = 复制积木（不移除原件）
+    if (e.key === 'd' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      _duplicateSelectedBlocks();
     }
     // 空格键 = 拖拽模式
     if (e.key === ' ' && e.target === document.body) {
       e.preventDefault();
       spaceDown = true;
       canvas.style.cursor = 'grab';
+    }
+    // Ctrl+F = 搜索积木
+    if (e.key === 'f' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      const searchBar = document.getElementById('search-bar');
+      const searchInput = document.getElementById('search-input');
+      if (searchBar && searchInput) {
+        searchBar.classList.remove('hidden');
+        searchInput.focus();
+        searchInput.select();
+      }
+    }
+    // Escape = 关闭搜索
+    if (e.key === 'Escape') {
+      const searchBar = document.getElementById('search-bar');
+      if (searchBar && !searchBar.classList.contains('hidden')) {
+        searchBar.classList.add('hidden');
+      }
     }
   }
 
@@ -709,6 +828,104 @@ const EditorCanvas = (function () {
     }
     delete EditorState.blocks[id];
     updateBlockCount();
+  }
+
+  /** 复制选中的积木（及其连接的链） */
+  function _copySelectedBlocks() {
+    const ids = selectedBlock ? [selectedBlock] : selectedBlocks;
+    if (!ids || ids.length === 0) return;
+    _clipboard = { blocks: {}, connections: [], rootIds: [] };
+    // 收集所有要复制的积木
+    const allIds = new Set();
+    ids.forEach(id => {
+      // 收集整条链
+      let cur = id;
+      while (cur && EditorState.blocks[cur]) {
+        if (allIds.has(cur)) break;
+        allIds.add(cur);
+        const b = EditorState.blocks[cur];
+        // 也收集子积木
+        if (b.subBlocks) {
+          Object.values(b.subBlocks).forEach(subId => {
+            let subCur = subId;
+            while (subCur && EditorState.blocks[subCur]) {
+              allIds.add(subCur);
+              subCur = EditorState.blocks[subCur].flowOut;
+            }
+          });
+        }
+        cur = b.flowOut;
+      }
+    });
+    // 复制积木数据
+    allIds.forEach(id => {
+      const b = EditorState.blocks[id];
+      if (b) _clipboard.blocks[id] = JSON.parse(JSON.stringify(b));
+    });
+    _clipboard.rootIds = ids.filter(id => allIds.has(id));
+    if (_clipboard.rootIds.length > 0) {
+      const statusEl = document.getElementById('status-text');
+      if (statusEl) {
+        statusEl.textContent = `已复制 ${allIds.size} 个积木`;
+        setTimeout(() => { statusEl.textContent = i18n.t('status.ready'); }, 1500);
+      }
+    }
+  }
+
+  /** 粘贴积木 */
+  function _pasteBlocks() {
+    if (!_clipboard || !_clipboard.blocks) return;
+    const idMap = {}; // oldId -> newId
+    // 生成新 ID
+    Object.keys(_clipboard.blocks).forEach(oldId => {
+      const newId = 'blk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      idMap[oldId] = newId;
+    });
+    // 复制并更新引用
+    const newBlocks = {};
+    Object.entries(_clipboard.blocks).forEach(([oldId, block]) => {
+      const nb = JSON.parse(JSON.stringify(block));
+      nb.id = idMap[oldId];
+      nb.x = (nb.x || 0) + 30; // 偏移粘贴位置
+      nb.y = (nb.y || 0) + 30;
+      // 更新连接引用
+      if (nb.flowIn && idMap[nb.flowIn]) nb.flowIn = idMap[nb.flowIn];
+      else nb.flowIn = null;
+      if (nb.flowOut && idMap[nb.flowOut]) nb.flowOut = idMap[nb.flowOut];
+      else nb.flowOut = null;
+      // 更新子积木引用
+      if (nb.subBlocks) {
+        const newSubs = {};
+        Object.entries(nb.subBlocks).forEach(([port, subId]) => {
+          newSubs[port] = idMap[subId] || subId;
+        });
+        nb.subBlocks = newSubs;
+      }
+      newBlocks[nb.id] = nb;
+    });
+    // 添加到编辑器
+    Object.assign(EditorState.blocks, newBlocks);
+    // 选中粘贴的积木
+    const newRootIds = _clipboard.rootIds.map(id => idMap[id]).filter(Boolean);
+    selectedBlocks = newRootIds;
+    selectedBlock = newRootIds[0] || null;
+    render();
+    updateBlockCount();
+    // 记录撤销历史
+    if (typeof HistoryManager !== 'undefined') HistoryManager.pushSnapshot();
+    const statusEl = document.getElementById('status-text');
+    if (statusEl) {
+      statusEl.textContent = `已粘贴 ${Object.keys(newBlocks).length} 个积木`;
+      setTimeout(() => { statusEl.textContent = i18n.t('status.ready'); }, 1500);
+    }
+  }
+
+  /** 复制选中的积木（不移除原件） */
+  function _duplicateSelectedBlocks() {
+    const ids = selectedBlock ? [selectedBlock] : selectedBlocks;
+    if (!ids || ids.length === 0) return;
+    _copySelectedBlocks();
+    _pasteBlocks();
   }
 
   /** 从面板拖入新积木 */
@@ -777,8 +994,13 @@ const EditorCanvas = (function () {
     else delete block._comment;
   }
 
+  /** 获取积木右键菜单元素（优先使用独立的 block-context-menu） */
+  function _getBlockMenu() {
+    return document.getElementById('block-context-menu') || document.getElementById('context-menu');
+  }
+
   function showContextMenu(cx, cy, blockId) {
-    const menu = document.getElementById('context-menu');
+    const menu = _getBlockMenu();
     menu.style.left = cx + 'px';
     menu.style.top = cy + 'px';
     menu.classList.remove('hidden');
@@ -828,10 +1050,104 @@ const EditorCanvas = (function () {
       const bpItem = menu.querySelector('[data-action="toggle-breakpoint"]');
       if (bpItem) bpItem.textContent = DevMode.isBreakpoint(blockId) ? '✅ 取消断点' : '🔴 设置断点';
     }
+    // 删除往后积木：只有当此积木有 flowOut 时才显示
+    const deleteChainEl = menu.querySelector('[data-action="delete-chain"]');
+    if (deleteChainEl) {
+      deleteChainEl.style.display = (block && block.flowOut) ? '' : 'none';
+    }
+    // 删除内部积木：只有当此积木是 C 型（有 subBlocks）时才显示
+    const deleteInnerEl = menu.querySelector('[data-action="delete-inner"]');
+    if (deleteInnerEl) {
+      const hasInner = block && (block.subBlocks?.length > 0 || block.ports?.subBlocks?.length > 0);
+      deleteInnerEl.style.display = hasInner ? '' : 'none';
+    }
+    // 分隔线：当两个新菜单项都隐藏时，隐藏分隔线
+    const divider = menu.querySelector('.ctx-divider');
+    if (divider) {
+      const chainVisible = deleteChainEl && deleteChainEl.style.display !== 'none';
+      const innerVisible = deleteInnerEl && deleteInnerEl.style.display !== 'none';
+      divider.style.display = (chainVisible || innerVisible) ? '' : 'none';
+    }
+  }
+
+  /** 获取积木的所有连接端口信息 */
+  function _getDisconnectPorts(block) {
+    const ports = [];
+    if (!block) return ports;
+    const getLabel = (b) => {
+      if (!b) return '?';
+      return typeof BlockRegistry !== 'undefined' ? (BlockRegistry.getLabel(b) || b.type).substring(0, 20) : (b.type || '?');
+    };
+    if (block.flowIn) ports.push({ label: '↑ 流入口 ← ' + getLabel(EditorState.blocks[block.flowIn]), portType: 'flowIn' });
+    if (block.flowOut) ports.push({ label: '↓ 流出口 → ' + getLabel(EditorState.blocks[block.flowOut]), portType: 'flowOut' });
+    if (block.paramConnections) {
+      Object.keys(block.paramConnections).forEach(pName => {
+        const connId = block.paramConnections[pName];
+        if (connId) ports.push({ label: '🔌 ' + pName + ' ← ' + getLabel(EditorState.blocks[connId]), portType: 'param', portName: pName });
+      });
+    }
+    if (block.subBlocks) {
+      Object.keys(block.subBlocks).forEach(sName => {
+        const subId = block.subBlocks[sName];
+        if (subId) ports.push({ label: '📦 ' + sName + ' → ' + getLabel(EditorState.blocks[subId]), portType: 'sub', portName: sName });
+      });
+    }
+    return ports;
+  }
+
+  /** 断开指定端口的连接 */
+  function _disconnectPort(block, blockId, portType, portName) {
+    if (portType === 'flowIn') {
+      if (block.flowIn) {
+        const parent = EditorState.blocks[block.flowIn];
+        if (parent) parent.flowOut = block.flowOut || null;
+      }
+      if (block.flowOut) {
+        const child = EditorState.blocks[block.flowOut];
+        if (child) child.flowIn = null;
+      }
+      // 把 flowOut 链到 flowIn 位置后断开
+      if (block.flowIn && block.flowOut) {
+        const parent = EditorState.blocks[block.flowIn];
+        if (parent) parent.flowOut = block.flowOut;
+        const child = EditorState.blocks[block.flowOut];
+        if (child) child.flowIn = block.flowIn;
+      } else if (block.flowIn) {
+        const parent = EditorState.blocks[block.flowIn];
+        if (parent) parent.flowOut = null;
+      }
+      block.flowIn = null;
+      block.flowOut = null;
+    } else if (portType === 'flowOut') {
+      if (block.flowOut) {
+        const child = EditorState.blocks[block.flowOut];
+        if (child) child.flowIn = null;
+      }
+      block.flowOut = null;
+    } else if (portType === 'param') {
+      delete block.paramConnections[portName];
+    } else if (portType === 'sub') {
+      const subId = block.subBlocks[portName];
+      if (subId) {
+        const subTop = EditorState.blocks[subId];
+        if (subTop) subTop.flowIn = null;
+      }
+      delete block.subBlocks[portName];
+    }
   }
 
   function hideContextMenu() {
-    document.getElementById('context-menu').classList.add('hidden');
+    var menu = _getBlockMenu();
+    menu.classList.add('hidden');
+    _removeDisconnectPorts(menu);
+  }
+
+  /** 移除菜单中动态插入的断开端口项 */
+  function _removeDisconnectPorts(menu) {
+    if (!menu) return;
+    menu.querySelectorAll('.ctx-port-item, .ctx-port-divider').forEach(el => el.remove());
+    var dcItem = menu.querySelector('[data-action="disconnect"]');
+    if (dcItem) dcItem.textContent = '断开连接 ▸';
   }
 
   function updateBlockCount() {
@@ -905,21 +1221,61 @@ const EditorCanvas = (function () {
     offsetY = rect.height / 2 - (block.y + 20) * scale;
   }
 
+  // ========== 积木搜索 (Ctrl+F) ==========
+  function searchBlocks(query) {
+    if (!query) return [];
+    const q = query.toLowerCase();
+    return Object.values(EditorState.blocks).filter(b => {
+      // 搜索积木类型
+      if (b.type.toLowerCase().includes(q)) return true;
+      // 搜索积木标签
+      const def = BlockRegistry.getBlock(b.type);
+      if (def && def.label && def.label.toLowerCase().includes(q)) return true;
+      // 搜索参数值
+      if (b.params) {
+        for (const val of Object.values(b.params)) {
+          if (String(val).toLowerCase().includes(q)) return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  function highlightSearchResults(results) {
+    // 高亮搜索结果（用特殊颜色绘制）
+    if (!results || results.length === 0) return;
+    // 跳转到第一个结果
+    const first = results[0];
+    if (first) {
+      selectedBlock = first.id;
+      jumpToBlock(first.id);
+    }
+    render();
+  }
+
   return {
     init, render, resize, addBlockFromPalette, getCanvas: () => canvas, screenToWorld,
     commitParamEdit: () => paramEditorState && commitParamEdit(),
     addListItem, removeListItem, addDynamicParam, removeDynamicParam,
     hasDynamicParams, editComment, toggleImportant, showGotoLabelDialog, jumpToBlock,
+    _getDisconnectPorts, _disconnectPort,
+    searchBlocks, highlightSearchResults,
+    getSelectedBlock: () => selectedBlock,
+    getSelectedBlocks: () => selectedBlocks,
   };
 })();
 
 // 右键菜单项事件
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.ctx-item').forEach(item => {
+  // 优先使用独立的 block-context-menu，避免与场景树/文件系统菜单冲突
+  var menuEl = document.getElementById('block-context-menu') || document.getElementById('context-menu');
+  if (!menuEl) return;
+
+  menuEl.querySelectorAll('.ctx-item').forEach(item => {
     item.addEventListener('click', (e) => {
       e.stopPropagation();
-      const menu = document.getElementById('context-menu');
-      const blockId = menu.dataset.blockId;
+      var menu = document.getElementById('block-context-menu') || document.getElementById('context-menu');
+      var blockId = menu.dataset.blockId;
       const action = item.dataset.action;
       if (action === 'delete' && blockId) {
         const b = window.EditorState?.blocks[blockId];
@@ -929,11 +1285,63 @@ document.addEventListener('DOMContentLoaded', () => {
           delete window.EditorState.blocks[blockId];
         }
       } else if (action === 'disconnect' && blockId) {
+        // 内联展开：在菜单内直接插入端口选项
         const b = window.EditorState?.blocks[blockId];
-        if (b) {
-          if (b.flowIn) { const p = window.EditorState.blocks[b.flowIn]; if (p) p.flowOut = null; }
-          b.flowIn = null;
+        if (!b) return;
+        const ports = EditorCanvas._getDisconnectPorts(b);
+        if (ports.length === 0) {
+          // 无连接，直接关闭菜单
+          menu.classList.add('hidden');
+          return;
         }
+        // 如果已经展开了端口列表，则收起并关闭
+        if (menu.querySelector('.ctx-port-item')) {
+          menu.querySelectorAll('.ctx-port-item, .ctx-port-divider').forEach(el => el.remove());
+          menu.classList.add('hidden');
+          return;
+        }
+        // 在断开连接项后面插入端口选项
+        const dcItem = menu.querySelector('[data-action="disconnect"]');
+        if (!dcItem) return;
+        dcItem.textContent = '断开连接 ▾';
+        // 全部断开
+        const allDiv = document.createElement('div');
+        allDiv.className = 'ctx-item ctx-port-item';
+        allDiv.style.fontWeight = '600';
+        allDiv.style.paddingLeft = '24px';
+        allDiv.textContent = '⚡ 全部断开 (' + ports.length + ')';
+        allDiv.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          ports.forEach(p => EditorCanvas._disconnectPort(b, blockId, p.portType, p.portName));
+          menu.querySelectorAll('.ctx-port-item, .ctx-port-divider').forEach(el => el.remove());
+          menu.classList.add('hidden');
+          EditorCanvas.render();
+        });
+        dcItem.insertAdjacentElement('afterend', allDiv);
+        // 分隔线
+        const sepDiv = document.createElement('div');
+        sepDiv.className = 'ctx-port-divider';
+        sepDiv.style.cssText = 'height:1px;background:var(--border,#313244);margin:2px 12px;';
+        allDiv.insertAdjacentElement('afterend', sepDiv);
+        // 各端口单独断开
+        let lastEl = sepDiv;
+        ports.forEach(p => {
+          const portDiv = document.createElement('div');
+          portDiv.className = 'ctx-item ctx-port-item';
+          portDiv.style.paddingLeft = '24px';
+          portDiv.style.fontSize = '11px';
+          portDiv.textContent = p.label;
+          portDiv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            EditorCanvas._disconnectPort(b, blockId, p.portType, p.portName);
+            menu.querySelectorAll('.ctx-port-item, .ctx-port-divider').forEach(el => el.remove());
+            menu.classList.add('hidden');
+            EditorCanvas.render();
+          });
+          lastEl.insertAdjacentElement('afterend', portDiv);
+          lastEl = portDiv;
+        });
+        return; // 不关闭主菜单
       } else if (action === 'add-list-item' && blockId) {
         const b = window.EditorState?.blocks[blockId];
         if (b && EditorCanvas.hasDynamicParams(b)) {
@@ -971,6 +1379,78 @@ document.addEventListener('DOMContentLoaded', () => {
           Executor.clearOutput();
           document.getElementById('output-log').textContent = '';
           Executor.run();
+        }
+      } else if (action === 'delete-chain' && blockId) {
+        // 删除往后的所有积木（沿 flowOut 链递归删除）
+        const blocks = window.EditorState?.blocks;
+        if (!blocks) return;
+        let currentId = blocks[blockId]?.flowOut;
+        let deletedCount = 0;
+        while (currentId) {
+          const b = blocks[currentId];
+          if (!b) break;
+          const nextId = b.flowOut;
+          // 删除当前积木
+          delete blocks[currentId];
+          deletedCount++;
+          currentId = nextId;
+        }
+        // 断开起始积木的 flowOut
+        if (blocks[blockId]) {
+          blocks[blockId].flowOut = null;
+        }
+        if (deletedCount > 0) {
+          EditorCanvas.render();
+          // 记录撤销历史
+          if (typeof HistoryManager !== 'undefined') HistoryManager.pushSnapshot();
+        }
+      } else if (action === 'delete-inner' && blockId) {
+        // 删除内部的所有积木（C 型积木的 subBlocks）
+        const blocks = window.EditorState?.blocks;
+        if (!blocks) return;
+        const block = blocks[blockId];
+        if (!block) return;
+        // 收集所有内部积木 ID
+        const subBlocks = block.subBlocks || block.ports?.subBlocks || [];
+        if (subBlocks.length === 0) return;
+        // 递归删除所有内部积木
+        let deletedCount = 0;
+        function _deleteInner(id) {
+          const b = blocks[id];
+          if (!b) return;
+          // 先递归删除子积木
+          const children = b.subBlocks || b.ports?.subBlocks || [];
+          children.forEach(_deleteInner);
+          // 再递归删除 flowOut 链
+          if (b.flowOut) _deleteChain(b.flowOut);
+          // 删除当前积木
+          delete blocks[id];
+          deletedCount++;
+        }
+        function _deleteChain(id) {
+          const b = blocks[id];
+          if (!b) return;
+          const children = b.subBlocks || b.ports?.subBlocks || [];
+          children.forEach(_deleteInner);
+          if (b.flowOut) _deleteChain(b.flowOut);
+          delete blocks[id];
+          deletedCount++;
+        }
+        subBlocks.forEach(id => {
+          const b = blocks[id];
+          if (!b) return;
+          const children = b.subBlocks || b.ports?.subBlocks || [];
+          children.forEach(_deleteInner);
+          if (b.flowOut) _deleteChain(b.flowOut);
+          delete blocks[id];
+          deletedCount++;
+        });
+        // 清空起始积木的内部积木列表
+        if (block.subBlocks) block.subBlocks = [];
+        if (block.ports?.subBlocks) block.ports.subBlocks = [];
+        if (deletedCount > 0) {
+          EditorCanvas.render();
+          if (typeof HistoryManager !== 'undefined') HistoryManager.pushSnapshot();
         }
       }
       menu.classList.add('hidden');

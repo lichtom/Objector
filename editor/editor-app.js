@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 编辑器窗口入口 - 初始化编辑器模块，绑定 UI 事件
  */
 window.EditorApp = (function () {
@@ -884,6 +884,7 @@ window.EditorApp = (function () {
   // ============================================================
   let _codeMirrorInstance = null;
   let _spriteScripts = {}; // index -> JS code
+  let _nodeScripts = {};   // nodeId -> JS code（非 Sprite2D 节点的脚本）
   let _advancedInitialized = false;
 
   function initAdvancedMode() {
@@ -894,6 +895,20 @@ window.EditorApp = (function () {
     const advancedLayout = document.getElementById('advanced-layout');
     if (!mainLayout || !advancedLayout) return;
 
+    // 先将面板恢复到 main-layout（可能被 MC 模式或其他模式移走了）
+    const palettePanel = document.getElementById('palette-panel');
+    const editorPanel = document.getElementById('editor-panel');
+    const stagePanel = document.getElementById('stage-panel');
+    if (palettePanel && palettePanel.parentNode !== mainLayout) {
+      mainLayout.insertBefore(palettePanel, mainLayout.firstChild);
+    }
+    if (editorPanel && editorPanel.parentNode !== mainLayout) {
+      palettePanel?.parentNode?.insertBefore(editorPanel, palettePanel.nextSibling);
+    }
+    if (stagePanel && stagePanel.parentNode !== mainLayout) {
+      mainLayout.appendChild(stagePanel);
+    }
+
     // 切换布局
     mainLayout.classList.add('hidden');
     advancedLayout.classList.remove('hidden');
@@ -903,13 +918,19 @@ window.EditorApp = (function () {
     const editorCanvas = document.getElementById('editor-canvas');
     const viewport = document.getElementById('viewport');
     const blocksContent = document.getElementById('script-blocks-content');
-    const palettePanel = document.getElementById('palette-panel');
-    const editorPanel = document.getElementById('editor-panel');
 
     if (stageCanvas && viewport) viewport.appendChild(stageCanvas);
     // 将积木面板和编辑器面板移入脚本区域
     if (palettePanel && blocksContent) blocksContent.appendChild(palettePanel);
     if (editorPanel && blocksContent) blocksContent.appendChild(editorPanel);
+
+    // 画布移入新容器后，重新计算尺寸
+    setTimeout(() => {
+      if (typeof EditorCanvas !== 'undefined') {
+        EditorCanvas.resize();
+        EditorCanvas.render();
+      }
+    }, 50);
 
     // 初始化 SceneGraph（场景图核心）
     const renderMode = (typeof EditorState !== 'undefined' && EditorState.renderMode) || '2d';
@@ -939,11 +960,17 @@ window.EditorApp = (function () {
         autoCloseBrackets: true,
         value: '// 在此编写 JavaScript 代码\n// 可用对象：sprite（当前角色）、globalVars（全局变量）\n// 示例：\n// sprite.x = 100;\n// sprite.say("Hello!");\n',
       });
-      // 实时保存代码到 _spriteScripts
+      // 实时保存代码：精灵节点用 index，其他节点用 nodeId
       _codeMirrorInstance.on('change', () => {
+        const selId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
         const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
-        if (selIdx >= 0) {
+        const node = selId ? SceneGraph.getNode(selId) : null;
+        const isSprite = node && node.type === 'Sprite2D';
+
+        if (isSprite && selIdx >= 0) {
           _spriteScripts[selIdx] = _codeMirrorInstance.getValue();
+        } else if (selId) {
+          _nodeScripts[selId] = _codeMirrorInstance.getValue();
         }
       });
     }
@@ -963,38 +990,83 @@ window.EditorApp = (function () {
       });
     });
 
-    // ⧉ 新窗口编辑代码
+    // 3D 和 UI 场景仅支持 JS 脚本，隐藏积木 tab
+    if (typeof SceneGraph !== 'undefined' && SceneGraph.isJsOnly && SceneGraph.isJsOnly()) {
+      const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
+      const jsTab = document.querySelector('.script-tab[data-tab="js"]');
+      if (blocksTab) blocksTab.classList.add('hidden');
+      if (jsTab) jsTab.click();
+    }
+
+    // ⧉ 新窗口编辑代码（支持任意节点类型）
     const popoutBtn = document.getElementById('btn-popout-js');
     if (popoutBtn && window.api && window.api.openJsEditor) {
       popoutBtn.addEventListener('click', () => {
-        // 获取当前选中精灵的脚本
+        // 获取当前选中节点
+        const selId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
         const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
-        if (selIdx < 0) {
-          alert('请先在场景树中选择一个 Sprite2D 节点');
+
+        if (!selId) {
+          alert('请先在场景树中选择一个节点');
           return;
         }
-        const sprite = (typeof StageManager !== 'undefined') ? StageManager.getSprites()[selIdx] : null;
-        const name = sprite ? sprite.name : ('角色' + (selIdx + 1));
+
+        const node = (typeof SceneGraph !== 'undefined') ? SceneGraph.getNode(selId) : null;
+        const isSprite = node && node.type === 'Sprite2D';
+        const name = node ? node.name : '脚本';
+
         // 先保存当前编辑器内容
         if (_codeMirrorInstance) {
-          EditorApp.setSpriteScript(selIdx, _codeMirrorInstance.getValue());
+          // 精灵节点用 spriteIdx，其他节点用 nodeId
+          if (isSprite && selIdx >= 0) {
+            EditorApp.setSpriteScript(selIdx, _codeMirrorInstance.getValue());
+          } else {
+            _nodeScripts[selId] = _codeMirrorInstance.getValue();
+          }
         }
-        const code = _spriteScripts[selIdx] || '// 在此编写 JavaScript 代码\n';
-        window.api.openJsEditor({ spriteIdx: selIdx, name: name + '.js', code: code });
+
+        // 获取代码：优先用节点 ID 存储，回退到精灵索引
+        let code;
+        if (_nodeScripts[selId] !== undefined) {
+          code = _nodeScripts[selId];
+        } else if (isSprite && selIdx >= 0) {
+          code = _spriteScripts[selIdx] || '// 在此编写 JavaScript 代码\n';
+        } else {
+          code = '// 在此编写 JavaScript 代码\n';
+        }
+
+        // 传递 nodeId 和 spriteIdx 用于回调识别
+        window.api.openJsEditor({
+          spriteIdx: selId,  // 用节点 ID 作为标识
+          name: name + '.js',
+          code: code
+        });
       });
 
       // 监听外部窗口保存的代码
-      window.api.onJsEditorCodeUpdated((spriteIdx, code) => {
-        _spriteScripts[spriteIdx] = code;
-        // 如果当前正在编辑这个角色，同步到内嵌编辑器
+      window.api.onJsEditorCodeUpdated((nodeId, code) => {
+        // 判断是精灵节点还是其他节点
+        const node = (typeof SceneGraph !== 'undefined') ? SceneGraph.getNode(nodeId) : null;
+        const isSprite = node && node.type === 'Sprite2D';
         const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
-        if (selIdx === spriteIdx && _codeMirrorInstance) {
+
+        if (isSprite && selIdx >= 0) {
+          _spriteScripts[selIdx] = code;
+        } else {
+          _nodeScripts[nodeId] = code;
+        }
+
+        // 如果当前正在编辑这个节点，同步到内嵌编辑器
+        const curSelId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
+        if (curSelId === nodeId && _codeMirrorInstance) {
           const cursor = _codeMirrorInstance.getCursor();
           _codeMirrorInstance.setValue(code);
           _codeMirrorInstance.setCursor(cursor);
         }
-        document.getElementById('status-text').textContent = '已保存代码: 角色 ' + (spriteIdx + 1);
-        console.log('[JS Editor] 外部窗口保存代码，角色:', spriteIdx);
+
+        const nodeName = node ? node.name : nodeId;
+        document.getElementById('status-text').textContent = '已保存代码: ' + nodeName;
+        console.log('[JS Editor] 外部窗口保存代码:', nodeName);
       });
     }
 
@@ -1107,6 +1179,371 @@ window.EditorApp = (function () {
     console.log('[高级模式] Godot 式编辑器已初始化');
   }
 
+  /** 初始化数据分析模式 */
+  function initDataMode() {
+    if (typeof DataAnalysis !== 'undefined') {
+      DataAnalysis.init();
+    }
+    console.log('[数据分析模式] 已初始化');
+  }
+
+  /** 初始化 Minecraft 模组开发模式 */
+  function initMinecraftMode() {
+    if (typeof MinecraftMod !== 'undefined') {
+      MinecraftMod.init();
+    }
+    console.log('[Minecraft 模组模式] 已初始化');
+  }
+
+  /** 初始化代码编程模式 */
+  let _codeEditor = null;
+  let _codeModeInitialized = false;
+  let _hintDebounce = null;
+
+  /** 注册代码自动补全 */
+  function _registerCodeHints(editor, cmMode) {
+    // 语言关键词字典
+    const keywords = {
+      'python': [
+        'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+        'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+        'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+        'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try',
+        'while', 'with', 'yield',
+        // 内建函数
+        'abs', 'all', 'any', 'bin', 'bool', 'bytes', 'callable', 'chr',
+        'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir',
+        'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format',
+        'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'help', 'hex',
+        'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len',
+        'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next',
+        'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'range',
+        'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted',
+        'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip',
+        // 常用模块
+        'os', 'sys', 'math', 'random', 'time', 'datetime', 'json', 're',
+        'collections', 'itertools', 'functools', 'pathlib', 'subprocess',
+      ],
+      'javascript': [
+        'arguments', 'await', 'break', 'case', 'catch', 'class', 'const',
+        'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export',
+        'extends', 'false', 'finally', 'for', 'function', 'if', 'import',
+        'in', 'instanceof', 'let', 'new', 'null', 'of', 'return', 'static',
+        'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'undefined',
+        'var', 'void', 'while', 'with', 'yield',
+        // 全局对象
+        'console', 'document', 'window', 'Math', 'JSON', 'Array', 'Object',
+        'String', 'Number', 'Boolean', 'Date', 'RegExp', 'Map', 'Set',
+        'Promise', 'Symbol', 'Proxy', 'Reflect', 'parseInt', 'parseFloat',
+        'isNaN', 'isFinite', 'setTimeout', 'setInterval', 'clearTimeout',
+        'clearInterval', 'fetch', 'alert', 'prompt', 'confirm',
+      ],
+      'text/x-c++src': [
+        'alignas', 'alignof', 'and', 'asm', 'auto', 'bitand', 'bitor',
+        'bool', 'break', 'case', 'catch', 'char', 'class', 'compl',
+        'concept', 'const', 'consteval', 'constexpr', 'continue', 'co_await',
+        'co_return', 'co_yield', 'decltype', 'default', 'delete', 'do',
+        'double', 'else', 'enum', 'explicit', 'export', 'extern', 'false',
+        'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long',
+        'mutable', 'namespace', 'new', 'noexcept', 'not', 'nullptr', 'operator',
+        'or', 'private', 'protected', 'public', 'register', 'requires',
+        'return', 'short', 'signed', 'sizeof', 'static', 'struct', 'switch',
+        'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid',
+        'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile',
+        'wchar_t', 'while', 'xor',
+        // 标准库
+        'std', 'cout', 'cin', 'endl', 'string', 'vector', 'map', 'set',
+        'array', 'pair', 'queue', 'stack', 'algorithm', 'iostream',
+      ],
+    };
+
+    const words = keywords[cmMode] || keywords['javascript'];
+
+    // 自定义 hint 函数
+    function wordHint(cm) {
+      const cur = cm.getCursor();
+      const token = cm.getTokenAt(cur);
+      let start = token.start;
+      let end = cur.ch;
+      const word = token.string.slice(0, end - start);
+
+      if (!word || word.length < 1) return null;
+
+      const list = words.filter(w => w.startsWith(word) && w !== word);
+
+      // 也从当前文档提取标识符
+      const docText = cm.getValue();
+      const docWords = docText.match(/\b[a-zA-Z_]\w*\b/g) || [];
+      const uniqueDocWords = [...new Set(docWords)].filter(w => w.startsWith(word) && w !== word && !list.includes(w));
+
+      const allList = [...list, ...uniqueDocWords].sort().slice(0, 50);
+
+      if (allList.length === 0) return null;
+
+      return {
+        list: allList,
+        from: CodeMirror.Pos(cur.line, start),
+        to: CodeMirror.Pos(cur.line, end),
+      };
+    }
+
+    // 注册到 CodeMirror
+    CodeMirror.registerHelper('hint', cmMode.includes('python') ? 'python' : (cmMode === 'text/x-c++src' ? 'clike' : 'javascript-custom'), wordHint);
+
+    // 输入时自动弹出补全（防抖 300ms）
+    let debounceTimer = null;
+    editor.on('inputRead', (cm, change) => {
+      if (change.text[0] && /^[a-zA-Z_]$/.test(change.text[0])) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const cur = cm.getCursor();
+          const token = cm.getTokenAt(cur);
+          if (token.string.length >= 2 && /^[a-zA-Z_]\w*$/.test(token.string)) {
+            cm.showHint({ hint: wordHint, completeSingle: false });
+          }
+        }, 300);
+      }
+    });
+  }
+
+  function initCodeMode(mode) {
+    if (_codeModeInitialized) return;
+    _codeModeInitialized = true;
+
+    // 语言和 CodeMirror 模式映射
+    const langConfig = {
+      'code-python':     { label: 'Python',     cmMode: 'python',         ext: 'py',  template: '# Python\nprint("Hello, World!")\n' },
+      'code-cpp':        { label: 'C++',        cmMode: 'text/x-c++src',  ext: 'cpp', template: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}\n' },
+      'code-javascript': { label: 'JavaScript', cmMode: 'javascript',     ext: 'js',  template: '// JavaScript\nconsole.log("Hello, World!");\n' },
+    };
+    const cfg = langConfig[mode] || langConfig['code-python'];
+    console.log(`[代码编程模式] ${cfg.label} 已初始化`);
+
+    // 隐藏所有其他布局
+    document.getElementById('main-layout')?.classList.add('hidden');
+    document.getElementById('advanced-layout')?.classList.add('hidden');
+    document.getElementById('data-layout')?.classList.add('hidden');
+    document.getElementById('mc-layout')?.classList.add('hidden');
+    document.getElementById('toolbar')?.classList.add('hidden');
+    document.getElementById('palette-panel')?.classList.add('hidden');
+    document.getElementById('stage-panel')?.classList.add('hidden');
+
+    // 显示代码编辑器布局
+    const codeLayout = document.getElementById('code-layout');
+    if (codeLayout) codeLayout.classList.remove('hidden');
+
+    // 更新语言标签
+    const langLabel = document.getElementById('code-lang-label');
+    if (langLabel) langLabel.textContent = cfg.label;
+
+    // 初始化 CodeMirror
+    const editorWrap = document.getElementById('code-editor-wrap');
+    if (editorWrap && typeof CodeMirror !== 'undefined' && !_codeEditor) {
+      // 临时显示布局以正确计算尺寸
+      const wasHidden = codeLayout.classList.contains('hidden');
+      if (wasHidden) {
+        codeLayout.style.visibility = 'hidden';
+        codeLayout.style.position = 'absolute';
+        codeLayout.classList.remove('hidden');
+      }
+
+      _codeEditor = CodeMirror(editorWrap, {
+        mode: cfg.cmMode,
+        theme: 'material-darker',
+        lineNumbers: true,
+        tabSize: 4,
+        indentWithTabs: false,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        value: cfg.template,
+        extraKeys: { 'Ctrl-Space': 'autocomplete' },
+        hintOptions: { completeSingle: false },
+      });
+
+      // 注册语言特定的关键词补全
+      _registerCodeHints(_codeEditor, cfg.cmMode);
+
+      if (wasHidden) {
+        codeLayout.classList.add('hidden');
+        codeLayout.style.visibility = '';
+        codeLayout.style.position = '';
+      }
+
+      // 延迟刷新确保正确渲染
+      setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
+    }
+
+    // 绑定工具栏按钮
+    document.getElementById('code-save-btn')?.addEventListener('click', async () => {
+      if (!_codeEditor || !EditorState.projectPath) return;
+      const code = _codeEditor.getValue();
+      await window.api.writeFile(EditorState.projectPath + '/scripts/main.' + cfg.ext, code);
+      const statusText = document.getElementById('code-status');
+      if (statusText) {
+        statusText.textContent = '✓ 已保存';
+        setTimeout(() => { statusText.textContent = ''; }, 2000);
+      }
+      document.getElementById('status-text').textContent = '代码已保存';
+      setTimeout(() => {
+        document.getElementById('status-text').textContent = i18n.t('status.ready');
+      }, 2000);
+    });
+
+    document.getElementById('code-clear-btn')?.addEventListener('click', () => {
+      if (!_codeEditor) return;
+      if (confirm('确定清空所有代码吗？')) {
+        _codeEditor.setValue('');
+      }
+    });
+
+    document.getElementById('code-run-btn')?.addEventListener('click', async () => {
+      if (!_codeEditor) return;
+      const code = _codeEditor.getValue();
+      const outputWrap = document.getElementById('code-output-wrap');
+      const outputEl = document.getElementById('code-output');
+      const runBtn = document.getElementById('code-run-btn');
+      const stopBtn = document.getElementById('code-stop-btn');
+      const statusEl = document.getElementById('code-status');
+      const inputBar = document.getElementById('code-input-bar');
+      const stdinInput = document.getElementById('code-stdin-input');
+      const stdinSend = document.getElementById('code-stdin-send');
+
+      const langKey = cfg.cmMode === 'python' ? 'python' : (cfg.cmMode === 'javascript' ? 'javascript' : 'cpp');
+
+      // 显示输出面板，清空内容
+      outputWrap?.classList.remove('hidden');
+      if (outputEl) outputEl.textContent = '';
+      if (runBtn) runBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
+      if (statusEl) statusEl.textContent = '运行中...';
+      // 显示 stdin 输入栏（Python/C++ 可能需要 input()）
+      inputBar?.classList.remove('hidden');
+
+      // 设置流式输出监听（必须在 runCode 之前注册）
+      if (window.api && window.api.onCodeOutput) {
+        window.api.onCodeOutput((text, type) => {
+          if (outputEl) {
+            outputEl.textContent += text;
+            // 自动滚动到底部
+            outputEl.scrollTop = outputEl.scrollHeight;
+          }
+        });
+        window.api.onCodeDone((exitCode) => {
+          if (runBtn) runBtn.disabled = false;
+          if (stopBtn) stopBtn.disabled = true;
+          if (statusEl) statusEl.textContent = exitCode === 0 ? '✓ 完成' : `退出码 ${exitCode}`;
+          if (outputEl) outputEl.textContent += `\n[进程结束, 退出码 ${exitCode}]`;
+          inputBar?.classList.add('hidden');
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
+        });
+      }
+
+      // stdin 发送函数
+      async function sendStdin() {
+        if (!stdinInput) return;
+        const text = stdinInput.value;
+        stdinInput.value = '';
+        if (outputEl) {
+          outputEl.textContent += text + '\n';
+          outputEl.scrollTop = outputEl.scrollHeight;
+        }
+        if (window.api && window.api.sendCodeStdin) {
+          await window.api.sendCodeStdin(text);
+        }
+      }
+      if (stdinSend) stdinSend.onclick = sendStdin;
+      if (stdinInput) stdinInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); sendStdin(); } };
+
+      try {
+        if (window.api && window.api.runCode) {
+          await window.api.runCode(langKey, code, EditorState.projectPath);
+        } else {
+          // Web 环境回退
+          if (langKey === 'javascript') {
+            if (outputEl) {
+              const origLog = console.log;
+              console.log = (...args) => {
+                outputEl.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') + '\n';
+                outputEl.scrollTop = outputEl.scrollHeight;
+                origLog(...args);
+              };
+              try {
+                new Function(code)();
+                outputEl.textContent += '[执行完成]\n';
+              } catch (e) {
+                outputEl.textContent += '❌ ' + e.message + '\n';
+              }
+              console.log = origLog;
+            }
+          } else {
+            if (outputEl) {
+              outputEl.textContent = `ℹ️ ${cfg.label} 代码只能在桌面版中运行。`;
+            }
+          }
+          if (runBtn) runBtn.disabled = false;
+          if (stopBtn) stopBtn.disabled = true;
+          inputBar?.classList.add('hidden');
+          if (statusEl) statusEl.textContent = '✓ 完成';
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+        }
+      } catch (e) {
+        if (outputEl) outputEl.textContent += '❌ ' + e.message + '\n';
+        if (runBtn) runBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
+        inputBar?.classList.add('hidden');
+        if (statusEl) statusEl.textContent = '❌ 错误';
+      }
+    });
+
+    document.getElementById('code-stop-btn')?.addEventListener('click', async () => {
+      if (window.api && window.api.stopCode) {
+        await window.api.stopCode();
+      }
+      const outputEl = document.getElementById('code-output');
+      if (outputEl) outputEl.textContent += '\n[已停止]';
+      const runBtn = document.getElementById('code-run-btn');
+      const stopBtn = document.getElementById('code-stop-btn');
+      const inputBar = document.getElementById('code-input-bar');
+      if (runBtn) runBtn.disabled = false;
+      if (stopBtn) stopBtn.disabled = true;
+      inputBar?.classList.add('hidden');
+    });
+
+    // 加载已保存的代码
+    _loadCodeFile(cfg.ext).then(code => {
+      if (code && _codeEditor) {
+        _codeEditor.setValue(code);
+        setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
+      }
+    });
+
+    // 窗口大小改变时刷新
+    window.addEventListener('resize', () => {
+      if (_codeEditor) setTimeout(() => _codeEditor.refresh(), 100);
+    });
+
+    // 在状态栏显示当前语言
+    const statusText = document.getElementById('status-text');
+    if (statusText) {
+      statusText.textContent = `代码编程：${cfg.label}`;
+    }
+  }
+
+  /** 加载已保存的代码文件 */
+  async function _loadCodeFile(ext) {
+    if (!EditorState.projectPath) return null;
+    try {
+      return await window.api.readFile(EditorState.projectPath + '/scripts/main.' + ext);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 获取代码编辑器实例 */
+  function getCodeEditor() {
+    return _codeEditor;
+  }
+
   /** 获取当前精灵的 JS 脚本 */
   function getSpriteScript(index) {
     return _spriteScripts[index] || '';
@@ -1132,7 +1569,17 @@ window.EditorApp = (function () {
     return _codeMirrorInstance;
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  /** 获取节点的 JS 脚本（非 Sprite2D 节点） */
+  function getNodeScript(nodeId) {
+    return _nodeScripts[nodeId] || '';
+  }
+
+  /** 设置节点的 JS 脚本（非 Sprite2D 节点） */
+  function setNodeScript(nodeId, code) {
+    _nodeScripts[nodeId] = code;
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
     // 全局错误捕获（帮助定位问题）
     window.addEventListener('error', (e) => {
       console.error('[全局错误]', e.message, e.filename, e.lineno);
@@ -1140,6 +1587,25 @@ window.EditorApp = (function () {
     window.addEventListener('unhandledrejection', (e) => {
       console.error('[未处理的Promise拒绝]', e.reason);
     });
+
+    // 加载用户设置的主题和自定义CSS
+    try {
+      const settings = JSON.parse(localStorage.getItem('objector-settings') || '{}');
+      if (settings.theme) {
+        document.documentElement.setAttribute('data-theme', settings.theme);
+      }
+      if (settings.customCss) {
+        let styleEl = document.getElementById('custom-style');
+        if (!styleEl) {
+          styleEl = document.createElement('style');
+          styleEl.id = 'custom-style';
+          document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = settings.customCss;
+      }
+    } catch (e) {
+      console.warn('[设置] 加载主题失败:', e);
+    }
 
     // 应用 i18n 到 DOM
     i18n.applyToDOM();
@@ -1189,13 +1655,34 @@ window.EditorApp = (function () {
     // 初始化扩展计时器
     window.__extTimerStart = Date.now();
 
-    // 获取 URL 参数中的项目路径和模式
-    const projectPath = params.get('path');
-    const projectMode = params.get('mode') || 'normal';
+    // 获取项目路径和模式：优先从 IPC 获取（避免 file:// URL 中文编码问题），回退到 URL 参数
+    let initData = null;
+    try {
+      if (window.api && window.api.getEditorInit) {
+        initData = await window.api.getEditorInit();
+      }
+    } catch(e) {}
+    const projectPath = (initData && initData.path) || params.get('path');
+    const projectMode = (initData && initData.mode) || params.get('mode') || 'normal';
 
     // 高级模式初始化
     if (projectMode === 'advanced') {
       initAdvancedMode();
+    }
+
+    // 数据分析模式初始化
+    if (projectMode === 'data') {
+      initDataMode();
+    }
+
+    // Minecraft 模组开发模式初始化
+    if (projectMode === 'minecraft') {
+      initMinecraftMode();
+    }
+
+    // 代码编程模式初始化
+    if (projectMode && projectMode.startsWith('code-')) {
+      initCodeMode(projectMode);
     }
 
     if (projectPath) {
@@ -1258,6 +1745,8 @@ window.EditorApp = (function () {
       'ext-docs': () => window.api && window.api.openExtensionDocs(),
       'view-code': () => showAllCodeDialog(),
       'blocks-guide': () => window.open('https://tomlct2015.github.io/Objector-Coder/blocks-guide/', '_blank'),
+      'advanced-guide': () => window.open('https://tomlct2015.github.io/Objector-Coder/how-to-use-advanced-editor/', '_blank'),
+      'minecraft-api': () => window.open('https://tomlct2015.github.io/Objector-Coder/minecraft-api/', '_blank'),
     };
 
     // 菜单栏下拉交互
@@ -1297,6 +1786,108 @@ window.EditorApp = (function () {
     // 工具栏运行/停止按钮
     document.getElementById('btn-run')?.addEventListener('click', _actionRun);
     document.getElementById('btn-stop')?.addEventListener('click', _actionStop);
+
+    // AI 助手按钮
+    document.getElementById('btn-ai-assistant')?.addEventListener('click', () => {
+      if (typeof AIAssistant !== 'undefined') {
+        AIAssistant.showPanel();
+      } else {
+        alert('AI 助手模块未加载');
+      }
+    });
+
+    document.getElementById('btn-cmd')?.addEventListener('click', () => {
+      window.api?.openCmdWindow();
+    });
+
+    // 协作管理按钮
+    document.getElementById('btn-collab')?.addEventListener('click', () => {
+      if (typeof CollaborationManager !== 'undefined') {
+        CollaborationManager.showPanel();
+      } else {
+        alert('协作管理模块未加载');
+      }
+    });
+
+    // ========== 积木搜索 (Ctrl+F) ==========
+    let _searchResults = [];
+    let _searchIndex = 0;
+    const searchBar = document.getElementById('search-bar');
+    const searchInput = document.getElementById('search-input');
+    const searchCount = document.getElementById('search-count');
+    const searchPrev = document.getElementById('search-prev');
+    const searchNext = document.getElementById('search-next');
+    const searchClose = document.getElementById('search-close');
+
+    function _openSearch() {
+      if (searchBar) {
+        searchBar.classList.remove('hidden');
+        searchInput?.focus();
+      }
+    }
+
+    function _closeSearch() {
+      if (searchBar) searchBar.classList.add('hidden');
+      _searchResults = [];
+      _searchIndex = 0;
+      if (searchCount) searchCount.textContent = '0 结果';
+    }
+
+    function _doSearch() {
+      const query = searchInput?.value?.trim();
+      if (!query) {
+        _searchResults = [];
+        _searchIndex = 0;
+        if (searchCount) searchCount.textContent = '0 结果';
+        return;
+      }
+      if (typeof EditorCanvas !== 'undefined') {
+        _searchResults = EditorCanvas.searchBlocks(query);
+        _searchIndex = 0;
+        if (searchCount) searchCount.textContent = _searchResults.length + ' 结果';
+        if (_searchResults.length > 0) {
+          EditorCanvas.highlightSearchResults(_searchResults);
+        }
+      }
+    }
+
+    function _searchNav(dir) {
+      if (_searchResults.length === 0) return;
+      _searchIndex = (_searchIndex + dir + _searchResults.length) % _searchResults.length;
+      const block = _searchResults[_searchIndex];
+      if (block && typeof EditorCanvas !== 'undefined') {
+        EditorCanvas.highlightSearchResults([block]);
+      }
+      if (searchCount) searchCount.textContent = (_searchIndex + 1) + '/' + _searchResults.length;
+    }
+
+    document.getElementById('btn-search')?.addEventListener('click', _openSearch);
+    searchInput?.addEventListener('input', _doSearch);
+    searchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { _searchNav(e.shiftKey ? -1 : 1); e.preventDefault(); }
+      if (e.key === 'Escape') _closeSearch();
+    });
+    searchPrev?.addEventListener('click', () => _searchNav(-1));
+    searchNext?.addEventListener('click', () => _searchNav(1));
+    searchClose?.addEventListener('click', _closeSearch);
+
+    // ========== 教程系统 ==========
+    document.getElementById('btn-tutorial')?.addEventListener('click', () => {
+      if (typeof TutorialSystem !== 'undefined') {
+        TutorialSystem.start('beginner');
+      } else {
+        alert('教程模块未加载');
+      }
+    });
+
+    // 初始化教程系统
+    if (typeof TutorialSystem !== 'undefined') {
+      TutorialSystem.init();
+      // 首次访问自动显示教程
+      if (!TutorialSystem.isDone()) {
+        setTimeout(() => TutorialSystem.start('beginner'), 1000);
+      }
+    }
 
     // 社区用户信息显示
     const communityUserInfo = document.getElementById('community-user-info');
@@ -1350,16 +1941,37 @@ window.EditorApp = (function () {
 
     // 键盘快捷键
     document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.key === 's') {
+      // Ctrl+Z = 撤销
+      if (e.ctrlKey && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        if (typeof HistoryManager !== 'undefined') HistoryManager.undo();
+      }
+      // Ctrl+Y 或 Ctrl+Shift+Z = 重做
+      else if (e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        if (typeof HistoryManager !== 'undefined') HistoryManager.redo();
+      }
+      else if (e.ctrlKey && e.shiftKey && e.key === 'Z') {
+        e.preventDefault();
+        if (typeof HistoryManager !== 'undefined') HistoryManager.redo();
+      }
+      // Ctrl+S = 保存
+      else if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
         _actionSave();
-      } else if (e.key === 'F5' && !e.shiftKey) {
+      }
+      // F5 = 运行
+      else if (e.key === 'F5' && !e.shiftKey) {
         e.preventDefault();
         _actionRun();
-      } else if (e.key === 'F5' && e.shiftKey) {
+      }
+      // Shift+F5 = 停止
+      else if (e.key === 'F5' && e.shiftKey) {
         e.preventDefault();
         _actionStop();
-      } else if (e.ctrlKey && e.shiftKey && (e.key === 'Q' || e.key === 'q')) {
+      }
+      // Ctrl+Shift+Q = 强制停止
+      else if (e.ctrlKey && e.shiftKey && (e.key === 'Q' || e.key === 'q')) {
         e.preventDefault();
         _actionForceStop();
       }
@@ -1374,10 +1986,14 @@ window.EditorApp = (function () {
       const spriteName = sprite ? sprite.name : '';
       document.getElementById('block-count').textContent =
         (i18n.isEnglish() ? spriteName + ': ' : spriteName + '：') + count + (i18n.isEnglish() ? ' blocks' : ' 个积木');
-      // 检测积木数据变化，标记未保存状态
+      // 检测积木数据变化，标记未保存状态并记录历史
       const snapshot = JSON.stringify(EditorState.blocks || {});
       if (snapshot !== EditorState._blocksSnapshot) {
         EditorState._isDirty = true;
+        // 记录撤销历史（防抖，避免拖拽时记录太多次）
+        if (typeof HistoryManager !== 'undefined') {
+          HistoryManager.pushSnapshotDebounced();
+        }
       }
     }, 500);
 
@@ -1643,6 +2259,10 @@ window.EditorApp = (function () {
           if (sceneData.rootId || sceneData.nodes) {
             SceneGraph.fromJSON(sceneData);
             if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+            // 3D 场景：同步 Mesh3D 节点到 Three.js 渲染
+            if (typeof Stage3D !== 'undefined' && Stage3D.isInitialized && Stage3D.isInitialized()) {
+              Stage3D.syncMeshesFromSceneGraph();
+            }
             sceneLoaded = true;
             console.log('[高级模式] 已从场景文件加载:', sceneFilePath);
           }
@@ -1655,6 +2275,10 @@ window.EditorApp = (function () {
         // 旧项目回退：从 config.sceneGraph 加载
         SceneGraph.fromJSON(config.sceneGraph);
         if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+        // 3D 场景：同步 Mesh3D 节点到 Three.js 渲染
+        if (typeof Stage3D !== 'undefined' && Stage3D.isInitialized && Stage3D.isInitialized()) {
+          Stage3D.syncMeshesFromSceneGraph();
+        }
         // 保存为场景文件（迁移到文件系统）
         try {
           await window.api.ensureDir(scenesDir);
@@ -1702,6 +2326,100 @@ window.EditorApp = (function () {
           Inspector.showNode(root.id);
         }
       }
+
+      // 3D 和 UI 场景仅支持 JS 脚本，隐藏积木 tab
+      if (typeof SceneGraph !== 'undefined' && SceneGraph.isJsOnly && SceneGraph.isJsOnly()) {
+        const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
+        const jsTab = document.querySelector('.script-tab[data-tab="js"]');
+        if (blocksTab) blocksTab.classList.add('hidden');
+        if (jsTab && !jsTab.classList.contains('active')) jsTab.click();
+      } else {
+        const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
+        if (blocksTab) blocksTab.classList.remove('hidden');
+      }
+    }
+
+    // 数据分析模式：初始化并重新应用布局（防止被其他模块覆盖）
+    if (EditorState.projectMode === 'data') {
+      initDataMode();
+      // 重新应用数据布局（即使已初始化，也要确保布局正确）
+      if (typeof DataAnalysis !== 'undefined') {
+        document.getElementById('main-layout')?.classList.add('hidden');
+        document.getElementById('advanced-layout')?.classList.add('hidden');
+        document.getElementById('data-layout')?.classList.remove('hidden');
+        document.getElementById('toolbar')?.classList.add('hidden');
+        document.getElementById('palette-panel')?.classList.add('hidden');
+        document.getElementById('stage-panel')?.classList.add('hidden');
+      }
+      // 尝试加载已保存的数据分析代码
+      try {
+        const codeStr = await window.api.readFile(folder + '/scripts/main.js');
+        if (codeStr && typeof DataAnalysis !== 'undefined') {
+          DataAnalysis.setCode(codeStr);
+        }
+      } catch(e) {}
+    }
+
+    // Minecraft 模组开发模式：初始化并重新应用布局
+    if (EditorState.projectMode === 'minecraft') {
+      initMinecraftMode();
+      // 重新将面板移入 mc-editor-panel（loadProject 过程中可能被重置）
+      if (typeof MinecraftMod !== 'undefined') {
+        const mcEditorPanel = document.getElementById('mc-editor-panel');
+        const palettePanel = document.getElementById('palette-panel');
+        const editorPanel = document.getElementById('editor-panel');
+        const mainLayout = document.getElementById('main-layout');
+        // 先恢复到 main-layout
+        if (palettePanel && palettePanel.parentNode !== mainLayout) {
+          mainLayout.insertBefore(palettePanel, mainLayout.firstChild);
+        }
+        if (editorPanel && editorPanel.parentNode !== mainLayout) {
+          palettePanel?.parentNode?.insertBefore(editorPanel, palettePanel.nextSibling);
+        }
+        // 再移入 mc-editor-panel
+        if (mcEditorPanel && palettePanel && editorPanel) {
+          mcEditorPanel.appendChild(palettePanel);
+          mcEditorPanel.appendChild(editorPanel);
+        }
+        document.getElementById('main-layout')?.classList.add('hidden');
+        document.getElementById('advanced-layout')?.classList.add('hidden');
+        document.getElementById('data-layout')?.classList.add('hidden');
+        document.getElementById('mc-layout')?.classList.remove('hidden');
+        document.getElementById('toolbar')?.classList.add('hidden');
+        document.getElementById('stage-panel')?.classList.add('hidden');
+        // 重新初始化积木面板
+        if (typeof Palette !== 'undefined') Palette.init();
+        // 延迟刷新 CodeMirror（布局从 hidden 变为可见后需要重新计算尺寸）
+        // 同时重绘画布（移入新容器后需要重新计算尺寸）
+        setTimeout(() => {
+          if (typeof EditorCanvas !== 'undefined') {
+            EditorCanvas.resize();
+            EditorCanvas.render();
+          }
+          if (typeof MinecraftMod !== 'undefined' && MinecraftMod.getEditor && MinecraftMod.getEditor()) {
+            MinecraftMod.getEditor().refresh();
+          }
+        }, 200);
+      }
+    }
+
+    // 代码编程模式：重新应用布局
+    if (EditorState.projectMode && EditorState.projectMode.startsWith('code-')) {
+      initCodeMode(EditorState.projectMode);
+      // 重新应用布局（确保隐藏其他布局）
+      document.getElementById('main-layout')?.classList.add('hidden');
+      document.getElementById('advanced-layout')?.classList.add('hidden');
+      document.getElementById('data-layout')?.classList.add('hidden');
+      document.getElementById('mc-layout')?.classList.add('hidden');
+      document.getElementById('toolbar')?.classList.add('hidden');
+      document.getElementById('palette-panel')?.classList.add('hidden');
+      document.getElementById('stage-panel')?.classList.add('hidden');
+      document.getElementById('code-layout')?.classList.remove('hidden');
+      // 延迟刷新 CodeMirror
+      setTimeout(() => {
+        const editor = getCodeEditor();
+        if (editor) editor.refresh();
+      }, 200);
     }
 
     // 加载声音
@@ -1714,6 +2432,16 @@ window.EditorApp = (function () {
     // 项目加载完成后重置未保存状态
     EditorState._isDirty = false;
     EditorState._blocksSnapshot = JSON.stringify(EditorState.blocks || {});
+
+    // 初始化历史记录管理器（用于撤销/重做）
+    if (typeof HistoryManager !== 'undefined') {
+      HistoryManager.init();
+    }
+
+    // 初始化自动保存管理器
+    if (typeof AutoSaveManager !== 'undefined') {
+      AutoSaveManager.init();
+    }
     } catch(e) {
       console.error('[项目加载失败]', e);
       document.getElementById('status-text').textContent = i18n.t('status.loadFailed', null).replace('{error}', e.message);
@@ -1723,36 +2451,181 @@ window.EditorApp = (function () {
   // ============================================================
   // 高级模式 JS 脚本执行
   // ============================================================
+
+  /** 创建精灵 API 代理对象（将所有积木功能映射为方法） */
+  function _createSpriteAPI(raw, idx) {
+    const SM = (typeof StageManager !== 'undefined') ? StageManager : null;
+    if (!SM) return raw;
+
+    const proxy = Object.create(null);
+
+    // 基础属性（getter/setter 直接读写原始精灵）
+    Object.defineProperties(proxy, {
+      name: { get() { return raw.name; }, set(v) { raw.name = v; if (typeof SceneTree !== 'undefined') SceneTree.refresh(); } },
+      x: { get() { return raw.x; }, set(v) { raw.x = Number(v); } },
+      y: { get() { return raw.y; }, set(v) { raw.y = Number(v); } },
+      direction: { get() { return raw.direction; }, set(v) { raw.direction = Number(v); } },
+      size: { get() { return raw.size; }, set(v) { raw.size = Number(v); } },
+      visible: { get() { return raw.visible; }, set(v) { raw.visible = !!v; } },
+      color: { get() { return raw.color; }, set(v) { raw.color = v; } },
+      sayText: { get() { return raw.sayText; }, set(v) { raw.sayText = String(v); } },
+      vx: { get() { return raw.vx || 0; }, set(v) { raw.vx = Number(v); } },
+      vy: { get() { return raw.vy || 0; }, set(v) { raw.vy = Number(v); } },
+      rotationStyle: { get() { return raw.rotationStyle; }, set(v) { raw.rotationStyle = v; } },
+      _raw: { value: raw },
+      _idx: { value: idx },
+    });
+
+    // === 外观 ===
+    proxy.say = (text) => { SM.setSpriteSay(idx, String(text)); };
+    proxy.sayFor = (text, sec) => { SM.setSpriteSay(idx, String(text)); setTimeout(() => SM.setSpriteSay(idx, ''), Number(sec) * 1000); };
+    proxy.think = (text) => { SM.setSpriteSay(idx, '\u{1F4AD} ' + String(text)); };
+    proxy.clearSay = () => { SM.setSpriteSay(idx, ''); };
+    proxy.show = () => { raw.visible = true; };
+    proxy.hide = () => { raw.visible = false; };
+    proxy.setSize = (sz) => { SM.setSpriteSize(idx, Number(sz)); };
+    proxy.changeSize = (n) => { SM.changeSpriteSize(idx, Number(n)); };
+    proxy.nextCostume = async () => {
+      if (typeof CostumeManager !== 'undefined') {
+        const names = CostumeManager.getAllNames();
+        if (names.length > 0) {
+          const curName = raw.costumeName || '';
+          const curIdx = names.indexOf(curName);
+          await SM.setSpriteCostume(idx, names[(curIdx + 1) % names.length]);
+        }
+      }
+    };
+    proxy.setCostume = async (name) => { await SM.setSpriteCostume(idx, name); };
+    proxy.setColor = (val) => { raw.colorEffect = Number(val); };
+    proxy.clearEffects = () => { raw.colorEffect = 0; raw.size = 100; };
+
+    // === 运动 ===
+    proxy.move = (steps) => { SM.moveSprite(idx, Number(steps)); };
+    proxy.turnRight = (deg) => { SM.rotateSprite(idx, Number(deg)); };
+    proxy.turnLeft = (deg) => { SM.rotateSprite(idx, -Number(deg)); };
+    proxy.pointInDirection = (deg) => { SM.setSpriteDir(idx, Number(deg)); };
+    proxy.goTo = (x, y) => { SM.setSpritePos(idx, Number(x), Number(y)); };
+    proxy.bounce = () => { SM.bounceSprite(idx); };
+    proxy.clampToStage = () => {
+      const hw = SM.STAGE_W / 2, hh = SM.STAGE_H / 2;
+      raw.x = Math.max(-hw, Math.min(hw, raw.x));
+      raw.y = Math.max(-hh, Math.min(hh, raw.y));
+    };
+    proxy.wrapAround = () => {
+      const hw = SM.STAGE_W / 2, hh = SM.STAGE_H / 2;
+      if (raw.x > hw) raw.x = -hw; else if (raw.x < -hw) raw.x = hw;
+      if (raw.y > hh) raw.y = -hh; else if (raw.y < -hh) raw.y = hh;
+    };
+    proxy.goToRandomPosition = () => {
+      const hw = SM.STAGE_W / 2, hh = SM.STAGE_H / 2;
+      raw.x = Math.random() * hw * 2 - hw;
+      raw.y = Math.random() * hh * 2 - hh;
+    };
+
+    // === 侦测 ===
+    proxy.isTouchingEdge = () => SM.isTouchingEdge(idx);
+    proxy.isTouchingSprite = (name) => {
+      const all = SM.getSprites();
+      const tIdx = all.findIndex(s => s.name === name);
+      return tIdx >= 0 ? SM.isTouchingSprite(idx, tIdx) : false;
+    };
+    proxy.distanceTo = (name) => {
+      const all = SM.getSprites();
+      const t = all.find(s => s.name === name);
+      return t ? SM.getDistanceToPoint(idx, t.x, t.y) : 0;
+    };
+    proxy.directionTo = (name) => {
+      const all = SM.getSprites();
+      const t = all.find(s => s.name === name);
+      return t ? SM.getDirectionToPoint(idx, t.x, t.y) : 0;
+    };
+    proxy.distanceToMouse = () => {
+      const SI = (typeof SensingInput !== 'undefined') ? SensingInput : null;
+      return SI ? SM.getDistanceToPoint(idx, SI.getMouseX(), SI.getMouseY()) : 0;
+    };
+    proxy.directionToMouse = () => {
+      const SI = (typeof SensingInput !== 'undefined') ? SensingInput : null;
+      return SI ? SM.getDirectionToPoint(idx, SI.getMouseX(), SI.getMouseY()) : 0;
+    };
+
+    // === 高级运动 ===
+    proxy.setVelocity = (vx, vy) => { SM.setVelocity(idx, vx, vy); };
+    proxy.changeVelocity = (dvx, dvy) => { SM.changeVelocity(idx, dvx, dvy); };
+    proxy.updateVelocity = () => { SM.updateVelocity(idx); };
+    proxy.applyGravity = (g) => { SM.applyGravity(idx, g); };
+    proxy.applyFriction = (f) => { SM.applyFriction(idx, f); };
+    proxy.bounceEdgeVelocity = () => { SM.bounceEdgeVelocity(idx); };
+    proxy.pointTowards = (tx, ty) => { SM.pointTowards(idx, tx, ty); };
+    proxy.moveTowards = (tx, ty, steps) => { SM.moveTowards(idx, tx, ty, steps || 3); };
+
+    // === 克隆 ===
+    proxy.clone = () => SM.cloneSprite(idx);
+
+    return proxy;
+  }
+
+  /** 创建全局 API 对象 */
+  function _createGlobalAPI() {
+    const SM = (typeof StageManager !== 'undefined') ? StageManager : null;
+    const SI = (typeof SensingInput !== 'undefined') ? SensingInput : null;
+    const SND = (typeof SoundManager !== 'undefined') ? SoundManager : null;
+
+    return {
+      get stageWidth() { return SM ? SM.STAGE_W : 480; },
+      get stageHeight() { return SM ? SM.STAGE_H : 360; },
+      getSprites: () => SM ? SM.getSprites() : [],
+      getSpriteByName: (name) => SM ? SM.getSpriteByName(name) : null,
+      getSpriteCount: () => SM ? SM.getSpriteCount() : 0,
+      setActiveSprite: (idx) => SM && SM.setActiveSprite(idx),
+      get mouseX() { return SI ? SI.getMouseX() : 0; },
+      get mouseY() { return SI ? SI.getMouseY() : 0; },
+      isMouseDown: () => SI ? SI.isMouseDown() : false,
+      isKeyPressed: (key) => SI ? SI.isKeyPressed(key) : false,
+      getVolume: () => SND ? SND.getVolume() : 0,
+      setVolume: (v) => SND && SND.setVolume(v),
+      random: (a, b) => Math.floor(Math.random() * (b - a + 1)) + a,
+      randomFloat: () => Math.random(),
+      randomRange: (a, b) => Math.random() * (b - a) + a,
+      now: () => new Date(),
+      timer: () => Date.now() / 1000,
+    };
+  }
+
   function runAdvancedScripts() {
     const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
     const globalVars = (typeof Executor !== 'undefined') ? Executor._getGlobalVars() : {};
     const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
     const editor = (typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) ? EditorApp.getJsEditor() : null;
+    const globalAPI = _createGlobalAPI();
 
     sprites.forEach((sprite, index) => {
-      // 优先从当前编辑器获取代码（如果是当前选中的精灵）
       let code;
       if (editor && selIdx === index) {
         code = editor.getValue();
-        _spriteScripts[index] = code;  // 同步保存
+        _spriteScripts[index] = code;
       } else {
         code = _spriteScripts[index] || '';
       }
-      // 跳过空代码和纯注释
       if (!code || !code.trim() || /^\s*(\/\/[^\n]*\n?|\/\*[\s\S]*?\*\/\s*)+$/.test(code)) return;
 
       try {
-        // 构建执行上下文
-        const fn = new Function('sprite', 'globalVars', 'log', code);
-        fn(
-          sprite,
-          globalVars,
-          (msg) => {
-            const logEl = document.getElementById('output-log');
-            if (logEl) logEl.textContent += '\n' + msg;
-          }
+        const api = _createSpriteAPI(sprite, index);
+        const logFn = (msg) => {
+          const logEl = document.getElementById('output-log');
+          if (logEl) logEl.textContent += '\n' + msg;
+        };
+        // 常用方法作为全局函数注入
+        const fn = new Function('sprite', 'globalVars', 'log', 'stage',
+          'say', 'sayFor', 'think', 'move', 'turnRight', 'turnLeft',
+          'show', 'hide', 'setSize', 'changeSize',
+          code
         );
-        // 执行后刷新渲染
+        fn(
+          api, globalVars, logFn, globalAPI,
+          api.say.bind(api), api.sayFor.bind(api), api.think.bind(api),
+          api.move.bind(api), api.turnRight.bind(api), api.turnLeft.bind(api),
+          api.show.bind(api), api.hide.bind(api), api.setSize.bind(api), api.changeSize.bind(api)
+        );
         if (typeof StageCanvas !== 'undefined') StageCanvas.render();
         if (typeof SceneTree !== 'undefined') SceneTree.refresh();
         if (typeof Inspector !== 'undefined') Inspector.refresh();
@@ -1772,6 +2645,8 @@ window.EditorApp = (function () {
     setSpriteScript,
     getAllSpriteScripts,
     setAllSpriteScripts,
+    getNodeScript,
+    setNodeScript,
     initAdvancedMode,
     runAdvancedScripts,
   };

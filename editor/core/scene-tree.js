@@ -208,13 +208,17 @@ const SceneTree = (function () {
 
   /** 选中节点 */
   function selectNode(id) {
-    // 保存当前精灵的代码
+    // 保存当前节点的代码
     const prevId = SceneGraph.getSelectedId();
     if (prevId && typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
       const prevNode = SceneGraph.getNode(prevId);
-      if (prevNode && prevNode.type === 'Sprite2D') {
-        const editor = EditorApp.getJsEditor();
-        if (editor) EditorApp.setSpriteScript(prevNode.spriteRef, editor.getValue());
+      const editor = EditorApp.getJsEditor();
+      if (prevNode && editor) {
+        if (prevNode.type === 'Sprite2D') {
+          EditorApp.setSpriteScript(prevNode.spriteRef, editor.getValue());
+        } else if (EditorApp.setNodeScript) {
+          EditorApp.setNodeScript(prevId, editor.getValue());
+        }
       }
     }
 
@@ -226,20 +230,30 @@ const SceneTree = (function () {
       Inspector.showNode(id);
     }
 
-    // 如果是 Sprite2D，同步 StageManager 选中
+    // 同步 StageManager 并加载脚本
     const node = SceneGraph.getNode(id);
-    if (node && node.type === 'Sprite2D' && typeof StageManager !== 'undefined') {
+    if (!node) return;
+
+    if (node.type === 'Sprite2D' && typeof StageManager !== 'undefined') {
       StageManager.syncFromSceneGraph();
       if (node.spriteRef !== null) {
         StageManager.setActiveSprite(node.spriteRef);
       }
-      // 加载对应脚本
-      if (typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
-        const editor = EditorApp.getJsEditor();
-        if (editor) {
-          const script = EditorApp.getSpriteScript(node.spriteRef) || '// 在此编写 JavaScript 代码\n';
-          editor.setValue(script);
+    }
+
+    // 加载对应脚本（精灵用 spriteRef，其他节点用 nodeId）
+    if (typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
+      const editor = EditorApp.getJsEditor();
+      if (editor) {
+        let script;
+        if (node.type === 'Sprite2D') {
+          script = EditorApp.getSpriteScript(node.spriteRef) || '// 在此编写 JavaScript 代码\n';
+        } else if (EditorApp.getNodeScript) {
+          script = EditorApp.getNodeScript(id) || '// 在此编写 JavaScript 代码\n';
+        } else {
+          script = '// 在此编写 JavaScript 代码\n';
         }
+        editor.setValue(script);
       }
     }
   }

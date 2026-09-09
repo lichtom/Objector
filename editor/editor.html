@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -7,14 +7,35 @@
   <script src="core/i18n.js"></script>
   <script src="i18n/zh-CN.js"></script>
   <script src="i18n/en.js"></script>
+  <!-- Web 版条件加载 API shim（Electron 版由 preload.js 提供） -->
+  <script>if(!window.api){document.write('<script src="web-api-shim.js"><\/script>')}</script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="../docs/community/shared/community-api.js"></script>
+  <!-- 社区 API（自动检测路径，兼容 Electron 和 Web 部署） -->
+  <script>
+    (function(){
+      var s=document.createElement('script');
+      var p=new URLSearchParams(location.search);
+      if(p.get('preview')){s.src='../community/shared/community-api.js'}
+      else{s.onerror=function(){var f=document.createElement('script');f.src='../community/shared/community-api.js';document.head.appendChild(f)};s.src='../docs/community/shared/community-api.js'}
+      document.head.appendChild(s);
+    })();
+  </script>
   <!-- CodeMirror 5 for JS editor in advanced mode -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.min.css">
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/clike/clike.min.js"></script>
+  <!-- Chart.js for data analysis charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <!-- 编辑器界面 -->
@@ -68,6 +89,14 @@
           <div class="menu-dropdown-item" data-action="blocks-guide">📖 积木指南</div>
         </div>
       </div>
+      <div class="menu-item" data-menu="help">
+        <span>帮助</span>
+        <div class="menu-dropdown">
+          <div class="menu-dropdown-item" data-action="advanced-guide">📚 如何使用高级模式</div>
+          <div class="menu-dropdown-item" data-action="blocks-guide">📖 积木使用指南</div>
+          <div class="menu-dropdown-item" data-action="minecraft-api">⛏️ Minecraft模组API</div>
+        </div>
+      </div>
     </div>
 
     <!-- 工具栏 -->
@@ -76,11 +105,26 @@
         <button id="btn-run" class="tb-btn tb-run" data-i18n="editor.run" data-i18n-title="editor.runTitle">▶ 运行</button>
         <button id="btn-stop" class="tb-btn tb-stop" data-i18n="editor.stop" data-i18n-title="editor.stopTitle" disabled>⏹ 停止</button>
         <span class="tb-sep"></span>
+        <button id="btn-search" class="tb-btn" style="font-size:11px;" title="搜索积木 (Ctrl+F)">🔍 搜索</button>
+        <button id="btn-tutorial" class="tb-btn" style="font-size:11px;" title="教程">📖 教程</button>
+        <span class="tb-sep"></span>
         <span id="community-user-info" class="tb-user-info hidden" style="font-size:11px;color:var(--text-secondary);padding:0 8px;"></span>
       </div>
       <div class="toolbar-right">
+        <button id="btn-ai-assistant" class="tb-btn" style="font-size:11px;" title="AI 辅助编程">🤖 AI</button>
+        <button id="btn-collab" class="tb-btn" style="font-size:11px;" title="协作管理">👥 协作</button><button id="btn-cmd" class="tb-btn" style="font-size:11px;" title="命令行">⌨️ 命令行</button>
+        <span class="tb-sep"></span>
         <span id="block-count">积木: 0</span>
       </div>
+    </div>
+
+    <!-- 搜索栏 -->
+    <div id="search-bar" class="hidden" style="position:absolute;top:70px;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:100;display:flex;align-items:center;gap:8px;">
+      <input id="search-input" type="text" placeholder="搜索积木... (类型/标签/参数)" style="width:200px;padding:4px 8px;background:var(--bg-alt);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;">
+      <span id="search-count" style="font-size:11px;color:var(--text-muted);min-width:40px;">0 结果</span>
+      <button id="search-prev" style="padding:2px 6px;background:var(--bg-alt);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;">◀</button>
+      <button id="search-next" style="padding:2px 6px;background:var(--bg-alt);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;">▶</button>
+      <button id="search-close" style="padding:2px 6px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;">✕</button>
     </div>
 
     <!-- 主体三栏布局 -->
@@ -166,6 +210,7 @@
           <div class="panel-header">
             <span class="panel-title">文件系统</span>
             <div style="display:flex;gap:2px;">
+              <button id="btn-new-scene" class="tb-btn tb-btn-small" title="新建场景">🎬+</button>
               <button id="btn-new-file" class="tb-btn tb-btn-small" title="新建文件">📄+</button>
               <button id="btn-new-folder" class="tb-btn tb-btn-small" title="新建文件夹">📁+</button>
               <button id="btn-refresh-fs" class="tb-btn tb-btn-small" title="刷新">↻</button>
@@ -211,6 +256,124 @@
       </aside>
     </div>
 
+    <!-- 数据分析模式布局（默认隐藏） -->
+    <div id="data-layout" class="hidden">
+      <!-- 顶部工具栏 -->
+      <div id="data-toolbar">
+        <button id="data-run" class="tb-btn tb-run">▶ 运行</button>
+        <button id="data-stop" class="tb-btn tb-stop" disabled>⏹ 停止</button>
+        <span class="tb-sep"></span>
+        <button id="data-import-csv" class="tb-btn">📂 导入 CSV</button>
+        <button id="data-import-json" class="tb-btn">📂 导入 JSON</button>
+        <button id="data-save-code" class="tb-btn">💾 保存代码</button>
+        <button id="data-clear-output" class="tb-btn">🗑️ 清除输出</button>
+        <span class="tb-sep"></span>
+        <div id="data-export-dropdown" style="position:relative;display:inline-block;">
+          <button id="data-export-btn" class="tb-btn">📤 导出 ▾</button>
+          <div id="data-export-menu" class="data-dropdown hidden">
+            <div class="data-dropdown-title">📊 导出图表</div>
+            <div class="data-dropdown-item" data-export="chart-html">📄 HTML 交互图表</div>
+            <div class="data-dropdown-item" data-export="chart-png">🖼️ PNG 图片</div>
+            <div class="data-dropdown-title">📋 导出数据</div>
+            <div class="data-dropdown-item" data-export="table-csv">📊 CSV (Excel 兼容)</div>
+            <div class="data-dropdown-item" data-export="table-xlsx">📗 Excel (.xlsx)</div>
+            <div class="data-dropdown-item" data-export="table-json">💾 JSON 数据</div>
+            <div class="data-dropdown-title">📝 导出全部</div>
+            <div class="data-dropdown-item" data-export="all-zip">📦 ZIP 打包全部</div>
+          </div>
+        </div>
+        <span class="tb-sep"></span>
+        <span id="data-info" style="font-size:11px;color:var(--text-secondary)"></span>
+      </div>
+      <!-- 主体两栏 -->
+      <div id="data-main">
+        <!-- 左侧代码编辑器 -->
+        <div id="data-code-panel">
+          <div class="data-panel-header">
+            <span>📝 代码编辑器</span>
+            <span class="data-hint">类似 Python 的数据分析语法</span>
+          </div>
+          <div id="data-editor"></div>
+        </div>
+        <!-- 分割条 -->
+        <div id="data-divider"></div>
+        <!-- 右侧输出面板 -->
+        <div id="data-output-panel">
+          <div id="data-output-tabs">
+            <button class="data-tab active" data-tab="chart">📈 图表</button>
+            <button class="data-tab" data-tab="table">📋 数据表</button>
+            <button class="data-tab" data-tab="log">📝 输出</button>
+          </div>
+          <div id="data-chart-content" class="data-tab-content">
+            <canvas id="data-chart-canvas"></canvas>
+          </div>
+          <div id="data-table-content" class="data-tab-content hidden">
+            <div id="data-table"></div>
+          </div>
+          <div id="data-log-content" class="data-tab-content hidden">
+            <pre id="data-log"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Minecraft 模组开发模式布局（默认隐藏） -->
+    <div id="mc-layout" class="hidden">
+      <!-- 顶部工具栏 -->
+      <div id="mc-toolbar">
+        <span class="mc-title"><img src="../我的世界.png" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;">Minecraft 模组开发</span>
+        <select id="mc-platform-select">
+          <option value="bedrock">基岩版 (JavaScript)</option>
+          <option value="netease">网易版 (Python)</option>
+          <option value="java">Java 版 (Fabric)</option>
+          <option value="mcfunction">.mcfunction 命令文件</option>
+        </select>
+        <button id="mc-generate-btn" class="tb-btn">生成代码</button>
+        <button id="mc-export-btn" class="tb-btn tb-run">导出模组</button>
+        <button id="mc-help-btn" class="tb-btn">📖 帮助</button>
+        <span class="mc-status" id="mc-status"></span>
+      </div>
+      <!-- 主体两栏布局 -->
+      <div id="mc-main">
+        <!-- 左侧积木编辑区 -->
+        <div id="mc-editor-panel">
+          <!-- 积木面板会被复用 -->
+        </div>
+        <!-- 分割条 -->
+        <div id="mc-divider"></div>
+        <!-- 右侧代码预览区 -->
+        <div id="mc-code-panel">
+          <div id="mc-code-header">代码预览</div>
+          <div id="mc-code-preview"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 代码编程模式布局（默认隐藏） -->
+    <div id="code-layout" class="hidden">
+      <!-- 顶部工具栏 -->
+      <div id="code-toolbar">
+        <span id="code-lang-label" class="code-lang-badge">Python</span>
+        <button id="code-run-btn" class="tb-btn tb-run">▶ 运行</button>
+        <button id="code-stop-btn" class="tb-btn tb-stop" disabled>⏹ 停止</button>
+        <button id="code-save-btn" class="tb-btn">💾 保存</button>
+        <button id="code-clear-btn" class="tb-btn">🗑️ 清空</button>
+        <span id="code-status" class="code-status-text"></span>
+      </div>
+      <!-- 主体区域：代码编辑器 -->
+      <div id="code-main">
+        <div id="code-editor-wrap"></div>
+        <div id="code-output-wrap" class="hidden">
+          <div id="code-output-header">输出</div>
+          <pre id="code-output"></pre>
+          <div id="code-input-bar" class="hidden">
+            <input id="code-stdin-input" type="text" placeholder="输入内容后按 Enter..." autocomplete="off" spellcheck="false" />
+            <button id="code-stdin-send" class="tb-btn tb-run">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 底部状态栏 -->
     <footer id="statusbar">
       <span id="status-text" data-i18n="status.ready">就绪</span>
@@ -222,14 +385,34 @@
   <div id="context-menu" class="hidden">
     <div class="ctx-item" data-action="duplicate" data-i18n="contextMenu.duplicate">复制积木</div>
     <div class="ctx-item" data-action="delete" data-i18n="contextMenu.delete">删除积木</div>
-    <div class="ctx-item" data-action="disconnect" data-i18n="contextMenu.disconnect">断开连接</div>
+    <div class="ctx-item" data-action="disconnect" data-i18n="contextMenu.disconnect">断开连接 ▸</div>
     <div class="ctx-item" data-action="toggle-collapse" data-i18n="contextMenu.collapse">📌 折叠/展开后续代码</div>
     <div class="ctx-item" data-action="toggle-important" data-i18n="contextMenu.important">⭐ 标记/取消重要代码</div>
     <div class="ctx-item" data-action="add-list-item" data-i18n="contextMenu.addListItem">+ 添加列表项</div>
     <div class="ctx-item" data-action="remove-list-item" data-i18n="contextMenu.removeListItem">- 移除最后一项</div>
     <div class="ctx-item" data-action="edit-comment" data-i18n="contextMenu.comment">💬 添加批注</div>
+    <div class="ctx-divider"></div>
+    <div class="ctx-item" data-action="delete-chain" data-i18n="contextMenu.deleteChain">🗑️ 删除往后的所有积木</div>
+    <div class="ctx-item" data-action="delete-inner" data-i18n="contextMenu.deleteInner">🗑️ 删除内部的所有积木</div>
     <div class="ctx-item dev-only hidden" data-action="toggle-breakpoint" data-i18n="contextMenu.breakpoint">🔴 设置/取消断点</div>
     <div class="ctx-item dev-only hidden" data-action="run-to-here" data-i18n="contextMenu.runToHere">▶ 运行到此处</div>
+  </div>
+
+  <!-- 积木右键菜单（高级模式专用，避免与场景树/文件系统菜单冲突） -->
+  <div id="block-context-menu" class="hidden" style="position:fixed;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:4px 0;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:120px;">
+    <div class="ctx-item" data-action="duplicate">复制积木</div>
+    <div class="ctx-item" data-action="delete">删除积木</div>
+    <div class="ctx-item" data-action="disconnect">断开连接 ▸</div>
+    <div class="ctx-item" data-action="toggle-collapse">📌 折叠/展开后续代码</div>
+    <div class="ctx-item" data-action="toggle-important">⭐ 标记/取消重要代码</div>
+    <div class="ctx-item" data-action="add-list-item">+ 添加列表项</div>
+    <div class="ctx-item" data-action="remove-list-item">- 移除最后一项</div>
+    <div class="ctx-item" data-action="edit-comment">💬 添加批注</div>
+    <div class="ctx-divider"></div>
+    <div class="ctx-item" data-action="delete-chain" data-i18n="contextMenu.deleteChain">🗑️ 删除往后的所有积木</div>
+    <div class="ctx-item" data-action="delete-inner" data-i18n="contextMenu.deleteInner">🗑️ 删除内部的所有积木</div>
+    <div class="ctx-item dev-only hidden" data-action="toggle-breakpoint">🔴 设置/取消断点</div>
+    <div class="ctx-item dev-only hidden" data-action="run-to-here">▶ 运行到此处</div>
   </div>
 
   <!-- 参数编辑输入框 -->
@@ -258,7 +441,26 @@
     </div>
   </div>
 
+  <!-- 教程系统 -->
+  <div id="tutorial-overlay" class="custom-prompt-overlay hidden" style="align-items:flex-start;padding-top:60px;">
+    <div class="custom-prompt-box" style="max-width:500px;width:90%;">
+      <div class="custom-prompt-title" id="tutorial-title">📖 入门教程</div>
+      <div id="tutorial-step-indicator" style="text-align:center;font-size:11px;color:var(--text-muted);margin:4px 0;">步骤 1 / 1</div>
+      <div id="tutorial-content" style="margin:16px 0;font-size:13px;line-height:1.7;color:var(--text);"></div>
+      <div id="tutorial-highlight" style="position:absolute;pointer-events:none;border:2px solid var(--accent);border-radius:8px;transition:all 0.3s;display:none;z-index:1001;"></div>
+      <div class="custom-prompt-actions" style="justify-content:space-between;">
+        <button id="tutorial-skip" class="tb-btn" data-i18n="tutorial.skip">跳过</button>
+        <div style="display:flex;gap:8px;">
+          <button id="tutorial-prev" class="tb-btn" data-i18n="tutorial.prev">◀ 上一步</button>
+          <button id="tutorial-next" class="tb-btn tb-run" data-i18n="tutorial.next">下一步 ▶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="core/block-defs.js"></script>
   <script src="core/block-types/events.js"></script>
   <script src="core/block-types/motion.js"></script>
@@ -286,6 +488,12 @@
   <script src="core/sensing-input.js"></script>
   <script src="core/file-editor.js"></script>
   <script src="core/html-exporter.js"></script>
+  <script src="core/history-manager.js"></script>
+  <script src="core/auto-save-manager.js"></script>
+  <script src="core/template-manager.js"></script>
+  <script src="core/ai-assistant.js"></script>
+  <script src="core/collaboration-manager.js"></script>
+  <script src="core/tutorial-system.js"></script>
   <script src="core/dev-mode.js"></script>
   <script src="stage/sprite.js"></script>
   <script src="stage/costume-manager.js"></script>
@@ -297,6 +505,9 @@
   <script src="core/add-node-dialog.js"></script>
   <script src="core/filesystem-dock.js"></script>
   <script src="core/inspector.js"></script>
+  <script src="core/data-analysis.js"></script>
+  <script src="core/block-types/minecraft.js"></script>
+  <script src="core/minecraft-mod.js"></script>
   <script src="editor-app.js"></script>
 </body>
 </html>
