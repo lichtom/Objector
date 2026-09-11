@@ -1,178 +1,185 @@
 # Objector
 
-> 图形化积木编程编辑器 — 用积木搭建无限创意
+> Visual Block Programming Editor — Build Unlimited Creativity with Blocks
 
 [![Version](https://img.shields.io/badge/version-1.0.25.beta-blue)](https://github.com/tomlct2015/Objector/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)](https://github.com/tomlct2015/Objector/releases)
 
-**Objector** 是一款基于 [Electron](https://www.electronjs.org/) 的图形化积木编程编辑器，让零基础用户也能创作动画、游戏和交互式程序。不仅仅是 Scratch 的复刻，更是面向专业开发者的全面进化。
+**Objector** is a [Electron](https://www.electronjs.org/)-based visual block programming editor that enables even beginners to create animations, games, and interactive programs. Not just a Scratch clone — it's a comprehensive evolution designed for professional developers.
 
-[🌐 在线体验网页版](https://tomlct2015.github.io/Objector-Coder/editor/) · [📖 积木使用指南](https://tomlct2015.github.io/Objector-Coder/blocks-guide/) · [📥 下载最新版本](https://github.com/tomlct2015/Objector/releases/latest)
+[🌐 Try Online](https://tomlct2015.github.io/Objector-Coder/editor/) · [📖 Blocks Guide](https://tomlct2015.github.io/Objector-Coder/blocks-guide/) · [📥 Download Latest](https://github.com/tomlct2015/Objector/releases/latest)
 
 ---
 
-## ✨ 核心特性
+## ✨ Key Features
 
-| 特性 | 说明 |
-|------|------|
-| 🧩 **可视化积木编程** | 拖拽式操作，支持流程连接、参数嵌入、C 型子代码块 |
-| 🤖 **AI 智能助手** | 内置 AI 对话窗口，支持 OpenAI / DeepSeek / 通义千问等模型，自然语言生成积木 |
-| ⚙️ **设置面板 + 6 种主题** | 默认 / 深色 / 浅色 / Solarized / Nord / Dracula，支持自定义 CSS |
-| 👥 **协作管理** | 推送进度、分支管理、查看人员、分享链接（基于 Supabase） |
-| ⌨️ **命令行窗口** | 独立终端，支持 `sprite` / `run` / `save` 等命令 |
-| 🐛 **专业调试系统** | 断点设置、单步执行、变量监视面板 |
-| 🎨 **12 大积木模块** | 事件、运动、外观、控制、运算、变量、函数、面向对象、列表、声音、3D、传感 |
-| 📦 **多格式导出** | HTML 独立运行文件、项目 ZIP 包 |
-| 🔍 **积木搜索 + 多选** | Ctrl+F 搜索积木，Shift+点击多选批量操作 |
-| 📖 **交互式教程** | 内置入门教程，高亮引导 UI 元素 |
-| 🌐 **PWA 支持** | 可作为 PWA 安装运行于 Android |
-| ⛏️ **Minecraft 模组开发** | 支持基岩版、网易版、Java 版模组代码生成 |
-| 💻 **代码编程模式** | Python / C++ / JavaScript 代码编辑器 |
-| 📊 **数据分析模式** | 类 Python 数据分析环境，支持图表和数据处理 |
+| Feature | Description |
+|---------|-------------|
+| 🧩 **Visual Block Programming** | Drag-and-drop blocks with flow connections, parameter embedding, and C-type sub-code blocks |
+| 🤖 **AI Assistant** | Built-in AI chat window supporting OpenAI / DeepSeek / Qwen and more — generate blocks from natural language |
+| ⚙️ **Settings Panel + 6 Themes** | Default / Dark / Light / Solarized / Nord / Dracula, with custom CSS editor |
+| 👥 **Collaboration** | Push progress, branch management, view members, share links (powered by Supabase) |
+| ⌨️ **Command Line** | Standalone terminal with `sprite` / `run` / `save` commands |
+| 🐛 **Professional Debugging** | Breakpoints, step-through execution, variable watch panel |
+| 🎨 **12 Block Modules** | Events, Motion, Looks, Control, Operators, Variables, Functions, OOP, Lists, Sound, 3D, Sensing |
+| 📦 **Multi-Format Export** | Standalone HTML files, project ZIP packages |
+| 🔍 **Block Search + Multi-Select** | Ctrl+F to search blocks, Shift+click for multi-select batch operations |
+| 📖 **Interactive Tutorial** | Built-in beginner tutorial with highlighted UI guidance |
+| 🌐 **PWA Support** | Installable as PWA on Android devices |
+| ⛏️ **Minecraft Mod Development** | Code generation for Bedrock, NetEase, and Java editions |
+| 💻 **Code Programming Mode** | Python / C++ / JavaScript code editor |
+| 📊 **Data Analysis Mode** | Python-like data analysis environment with charts and data processing |
 
-## 🎯 创作模式
+## 🎯 Creation Modes
 
-| 模式 | 说明 |
-|------|------|
-| 🎮 普通创作 | 经典积木编程，支持 2D / 3D 渲染 |
-| 🎬 高级创作 | Godot 式专业编辑器，积木与代码双模式 |
-| 🧩 扩展创作 | 创建自定义扩展积木 |
-| 📊 数据分析 | Python 式数据分析环境 |
-| ⛏️ MC 模组开发 | Minecraft 模组代码生成 |
-| 💻 代码编程 | Python / C++ / JavaScript 编程 |
+| Mode | Description |
+|------|-------------|
+| 🎮 Standard | Classic block programming with 2D / 3D rendering |
+| 🎬 Advanced | Godot-style professional editor with block and code dual modes |
+| 🧩 Extensions | Create custom extension blocks |
+| 📊 Data Analysis | Python-style data analysis environment |
+| ⛏️ MC Mod Dev | Minecraft mod code generation |
+| 💻 Code Programming | Python / C++ / JavaScript programming |
 
-## 📥 下载
+## 📥 Download
 
 ### Windows (x64)
-- **[安装包 (.exe)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-Setup-1.0.25.beta.exe)** — NSIS 安装程序，支持自定义安装路径
-- **[便携版 (.zip)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-1.0.25.beta-win.zip)** — 解压即用
+- **[Installer (.exe)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-Setup-1.0.25.beta.exe)** — NSIS installer with custom install path
+- **[Portable (.zip)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-1.0.25.beta-win.zip)** — Extract and run
 
 ### Linux (x64)
-- **[压缩包 (.tar.gz)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/objector-1.0.25.beta.tar.gz)** — 需要 libgtk-3 和 libnss3
+- **[Archive (.tar.gz)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/objector-1.0.25.beta.tar.gz)** — Requires libgtk-3 and libnss3
 
-### 🇨🇳 国内镜像加速
-如果 GitHub 下载较慢，可使用 [ghproxy 镜像](https://mirror.ghproxy.com/) 加速。
+See [all releases](https://github.com/tomlct2015/Objector/releases) for previous versions.
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 运行项目
+### Run from Source
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/tomlct2015/Objector.git
 cd Objector
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 启动
+# Start the application
 npm start
 ```
 
-### 打包
+### Build
 
 ```bash
-# Windows (NSIS + ZIP)
+# Windows (NSIS installer + ZIP portable)
 npx electron-builder build --win nsis zip
 
-# Linux (tar.gz)
+# Linux (tar.gz archive)
 npx electron-builder build --linux tar.gz
 ```
 
-## 🏗️ 项目结构
+## 🏗️ Project Structure
 
 ```
 Objector/
-├── src/                    # 源码目录
-│   ├── main.js             # Electron 主进程入口
-│   ├── preload.js          # 预加载脚本（IPC 桥接）
-│   ├── index.html          # 主页（项目选择/新建）
-│   ├── app.js              # 主页逻辑
-│   ├── editor.html         # 编辑器页面
-│   ├── editor-app.js       # 编辑器入口
-│   ├── styles.css          # 全局样式
-│   ├── ai-window.html      # AI 助手窗口
-│   ├── cmd-window.html     # 命令行窗口
-│   ├── core/               # 核心模块
-│   │   ├── editor-canvas.js        # 积木画布渲染
-│   │   ├── block-defs.js           # 积木定义
-│   │   ├── block-renderer.js       # 积木绘制
-│   │   ├── executor.js             # 积木执行器
-│   │   ├── ai-assistant.js         # AI 助手
-│   │   ├── collaboration-manager.js # 协作管理
-│   │   ├── history-manager.js      # 撤销/重做
-│   │   ├── palette.js              # 积木面板
-│   │   ├── scene-graph.js          # 场景图
-│   │   ├── project-manager.js      # 项目管理
-│   │   ├── tutorial-system.js      # 教程系统
-│   │   ├── sound-manager.js        # 声音管理
-│   │   ├── extension-manager.js    # 扩展管理
-│   │   ├── minecraft-mod.js        # MC 模组
+├── src/                    # Source code
+│   ├── main.js             # Electron main process entry
+│   ├── preload.js          # Preload script (IPC bridge)
+│   ├── index.html          # Home page (project selection/creation)
+│   ├── app.js              # Home page logic
+│   ├── editor.html         # Editor page
+│   ├── editor-app.js       # Editor entry point
+│   ├── styles.css          # Global styles
+│   ├── ai-window.html      # AI assistant window
+│   ├── cmd-window.html     # Command line window
+│   ├── core/               # Core modules
+│   │   ├── editor-canvas.js        # Block canvas rendering
+│   │   ├── block-defs.js           # Block definitions
+│   │   ├── block-renderer.js       # Block drawing
+│   │   ├── executor.js             # Block execution engine
+│   │   ├── ai-assistant.js         # AI assistant
+│   │   ├── collaboration-manager.js # Collaboration management
+│   │   ├── history-manager.js      # Undo/Redo
+│   │   ├── palette.js              # Block palette
+│   │   ├── scene-graph.js          # Scene graph
+│   │   ├── project-manager.js      # Project management
+│   │   ├── tutorial-system.js      # Tutorial system
+│   │   ├── sound-manager.js        # Sound management
+│   │   ├── extension-manager.js    # Extension management
+│   │   ├── minecraft-mod.js        # Minecraft mod support
 │   │   └── ...
-│   ├── stage/              # 舞台模块
-│   │   ├── stage-canvas.js # 2D 舞台渲染
-│   │   ├── stage-3d.js     # 3D 舞台渲染
-│   │   ├── stage-manager.js # 角色管理
-│   │   └── sprite.js       # 角色类
-│   └── i18n/               # 国际化
-│       ├── zh-CN.js
-│       └── en.js
-├── editor/                 # 运行时目录（src 的副本）
-├── tests/                  # 测试
-├── electron-builder.json   # 打包配置
+│   ├── stage/              # Stage modules
+│   │   ├── stage-canvas.js # 2D stage rendering
+│   │   ├── stage-3d.js     # 3D stage rendering (Three.js)
+│   │   ├── stage-manager.js # Sprite management
+│   │   └── sprite.js       # Sprite class
+│   └── i18n/               # Internationalization
+│       ├── zh-CN.js        # Chinese
+│       └── en.js           # English
+├── editor/                 # Runtime directory (copy of src)
+├── tests/                  # Unit tests
+├── electron-builder.json   # Build configuration
 ├── package.json
 └── README.md
 ```
 
-## 🧱 积木数据结构
+## 🧱 Block Data Structure
 
-Objector 的积木使用 JS 对象存储：
+Objector stores blocks as JavaScript objects:
 
 ```javascript
 {
-  id: "blk_abc123",           // 唯一 ID
-  type: "control_repeat",     // 积木类型
-  x: 100, y: 200,            // 画布坐标
-  params: { times: 10 },      // 参数值
-  flowIn: null,               // 上一个积木 ID
-  flowOut: "blk_def456",      // 下一个积木 ID
-  subBlocks: { body: "blk_sub" },  // C 型槽子积木
-  paramConnections: {}         // 参数连接
+  id: "blk_abc123",                    // Unique block ID
+  type: "control_repeat",             // Block type
+  x: 100, y: 200,                     // Canvas coordinates
+  params: { times: 10 },              // Parameter values
+  flowIn: null,                       // Previous block in chain (null = chain start)
+  flowOut: "blk_def456",              // Next block in chain (null = chain end)
+  subBlocks: { body: "blk_sub" },     // C-type slot: sub-block entry point
+  paramConnections: { steps: "blk_r" } // Parameter connections to reporter blocks
 }
 ```
 
-## 🤖 AI 助手
+**Key concepts:**
+- **flowOut / flowIn**: Sequential execution chain — `A.flowOut = B.id` means A executes before B
+- **subBlocks**: C-type slots (e.g., `body`, `then`, `else`) — entry points for nested code blocks
+- **paramConnections**: Reporter/boolean blocks connected to parameter input slots
 
-AI 助手支持通过 `>>>` 指令系统操作编辑器：
+## 🤖 AI Assistant
+
+The AI assistant supports a `>>>` command system for editor operations:
 
 ```
->>> sprite add "角色名"      # 添加角色
->>> sprite list              # 列出所有角色
->>> run                      # 运行项目
->>> save                     # 保存项目
+>>> sprite add "MySprite"    # Add a new sprite
+>>> sprite list              # List all sprites
+>>> run                      # Run the project
+>>> save                     # Save the project
 ```
 
-支持的工具调用：`generate_blocks`、`modify_blocks`、`manage_sprites`、`run_project`、`save_project`、`screenshot`、`fetch_url`
+**Available tool calls:** `generate_blocks`, `modify_blocks`, `manage_sprites`, `run_project`, `save_project`, `screenshot`, `fetch_url`
 
-## 🛠️ 技术栈
+## 🛠️ Tech Stack
 
-- **运行时**: [Electron 43](https://www.electronjs.org/)
-- **渲染**: Canvas 2D + [Three.js](https://threejs.org/)（3D 模式）
-- **代码编辑**: [CodeMirror 5](https://codemirror.net/5/)
-- **图表**: [Chart.js 4](https://www.chartjs.org/)
-- **数据库**: [Supabase](https://supabase.com/)（社区 & 协作）
-- **打包**: [electron-builder](https://www.electron.build/)
-- **压缩**: [JSZip](https://stuk.github.io/jszip/) + [Archiver](https://www.archiverjs.com/)
+| Category | Technology |
+|----------|-----------|
+| Runtime | [Electron 43](https://www.electronjs.org/) |
+| 2D Rendering | Canvas 2D |
+| 3D Rendering | [Three.js](https://threejs.org/) |
+| Code Editor | [CodeMirror 5](https://codemirror.net/5/) |
+| Charts | [Chart.js 4](https://www.chartjs.org/) |
+| Database | [Supabase](https://supabase.com/) (Community & Collaboration) |
+| Build | [electron-builder](https://www.electron.build/) |
+| Compression | [JSZip](https://stuk.github.io/jszip/) + [Archiver](https://www.archiverjs.com/) |
 
-## 📄 许可证
+## 📄 License
 
-[MIT License](LICENSE) — 开源免费
+[MIT License](LICENSE) — Free and open source
 
-## 🔗 相关链接
+## 🔗 Links
 
-- [官网](https://tomlct2015.github.io/Objector-Coder/)
-- [在线编辑器](https://tomlct2015.github.io/Objector-Coder/editor/)
-- [积木使用指南](https://tomlct2015.github.io/Objector-Coder/blocks-guide/)
-- [扩展 API 文档](https://tomlct2015.github.io/Objector-Coder/extension-api/)
-- [历史版本下载](https://tomlct2015.github.io/Objector-Coder/versions.html)
+- [Website](https://tomlct2015.github.io/Objector-Coder/)
+- [Online Editor](https://tomlct2015.github.io/Objector-Coder/editor/)
+- [Blocks Guide](https://tomlct2015.github.io/Objector-Coder/blocks-guide/)
+- [Extension API Docs](https://tomlct2015.github.io/Objector-Coder/extension-api/)
+- [Version History](https://tomlct2015.github.io/Objector-Coder/versions.html)
