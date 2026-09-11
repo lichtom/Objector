@@ -1747,6 +1747,10 @@ window.EditorApp = (function () {
       'blocks-guide': () => window.open('https://tomlct2015.github.io/Objector-Coder/blocks-guide/', '_blank'),
       'advanced-guide': () => window.open('https://tomlct2015.github.io/Objector-Coder/how-to-use-advanced-editor/', '_blank'),
       'minecraft-api': () => window.open('https://tomlct2015.github.io/Objector-Coder/minecraft-api/', '_blank'),
+      'collab-push-progress': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.pushProgress(),
+      'collab-push-branch': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.pushToBranch(),
+      'collab-view-members': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.viewMembers(),
+      'collab-share-link': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.generateShareLink(),
     };
 
     // 菜单栏下拉交互
@@ -1901,6 +1905,10 @@ window.EditorApp = (function () {
         communityUserInfo.classList.remove('hidden');
       } else if (communityUserInfo) {
         communityUserInfo.classList.add('hidden');
+      }
+      // 更新协作菜单可见性
+      if (typeof CollaborationManager !== 'undefined') {
+        CollaborationManager.updateMenuVisibility();
       }
     }
 

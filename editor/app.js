@@ -585,21 +585,41 @@
     const menuDeleteAccount = document.getElementById('menu-delete-account');
     const loginRegisterLink = document.getElementById('login-register-link');
 
-    // Toggle user menu dropdown
-    btnLogin.addEventListener('click', (e) => {
-      if (typeof CommunityAPI === 'undefined') {
-        alert(i18n.isEnglish() ? 'Community module not loaded' : '社区模块未加载');
+    // Helper: 等待 CommunityAPI 加载完成
+    function _waitForCommunityAPI(callback, maxRetries = 20) {
+      if (typeof CommunityAPI !== 'undefined') {
+        callback();
         return;
       }
-      const user = CommunityAPI.getUser();
-      if (user) {
-        // Logged in: show menu
-        e.stopPropagation();
-        userMenu.classList.toggle('hidden');
-      } else {
-        // Not logged in: show login dialog
-        showLoginDialog();
-      }
+      let retries = 0;
+      const interval = setInterval(() => {
+        retries++;
+        if (typeof CommunityAPI !== 'undefined') {
+          clearInterval(interval);
+          callback();
+        } else if (retries >= maxRetries) {
+          clearInterval(interval);
+          alert(i18n.isEnglish() ? 'Community module failed to load. Please check network.' : '社区模块加载失败，请检查网络连接。');
+        }
+      }, 500);
+    }
+
+    // Toggle user menu dropdown
+    btnLogin.addEventListener('click', (e) => {
+      _waitForCommunityAPI(() => {
+        if (!CommunityAPI.isConfigured()) {
+          CommunityAPI.init();
+        }
+        const user = CommunityAPI.getUser();
+        if (user) {
+          // Logged in: show menu
+          e.stopPropagation();
+          userMenu.classList.toggle('hidden');
+        } else {
+          // Not logged in: show login dialog
+          showLoginDialog();
+        }
+      });
     });
 
     // Close menu when clicking outside
@@ -662,20 +682,17 @@
     }
 
     function showLoginDialog() {
-      if (typeof CommunityAPI === 'undefined') {
-        alert(i18n.isEnglish() ? 'Community module not loaded' : '社区模块未加载');
-        return;
-      }
-      if (!CommunityAPI.isConfigured()) {
-        CommunityAPI.init();
-      }
+      _waitForCommunityAPI(() => {
+        if (!CommunityAPI.isConfigured()) {
+          CommunityAPI.init();
+        }
 
-      const overlay = document.getElementById('community-login-dialog');
-      const emailInput = document.getElementById('login-email');
-      const passInput = document.getElementById('login-password');
-      const resultEl = document.getElementById('login-result');
-      const submitBtn = document.getElementById('login-submit');
-      const cancelBtn = document.getElementById('login-cancel');
+        const overlay = document.getElementById('community-login-dialog');
+        const emailInput = document.getElementById('login-email');
+        const passInput = document.getElementById('login-password');
+        const resultEl = document.getElementById('login-result');
+        const submitBtn = document.getElementById('login-submit');
+        const cancelBtn = document.getElementById('login-cancel');
 
       // OTP elements
       const tabPassword = document.getElementById('login-tab-password');
@@ -871,15 +888,14 @@
         if (e.key === 'Enter') { e.preventDefault(); otpCodeInput.focus(); }
         else if (e.key === 'Escape') { e.preventDefault(); close(); }
       };
+      }); // close _waitForCommunityAPI callback
     }
 
-    if (typeof CommunityAPI !== 'undefined') {
+    // 初始化社区 API 并恢复登录状态
+    _waitForCommunityAPI(() => {
       CommunityAPI.init();
       CommunityAPI.restoreSession().then(() => refreshCommunityUI());
-    } else {
-      btnLogin.textContent = '👤 ' + (i18n.isEnglish() ? 'Login' : '登录');
-      btnLogin.addEventListener('click', () => alert(i18n.isEnglish() ? 'Community module not loaded' : '社区模块未加载'));
-    }
+    });
 
     // 启动时渲染固定项目和最近项目
     renderPinnedProjects();

@@ -117,24 +117,15 @@ const EditorCanvas = (function () {
     drawGrid();
 
 
-    // 绘制所有顶级积木（无 flowIn 的）及其子代码链
+    // 绘制所有积木，每个积木独立检查可见性
     const drawn = new Set();
     function drawBlockWithSubs(blk) {
       if (drawn.has(blk.id)) return;
-      // 虚拟化渲染：跳过不在视口内的积木
-      if (!_isBlockVisible(blk, vpBounds)) {
-        drawn.add(blk.id);
-        // 跳过整条链
-        let cur = blk.flowOut;
-        while (cur && EditorState.blocks[cur]) {
-          drawn.add(cur);
-          cur = EditorState.blocks[cur].flowOut;
-        }
-        return;
-      }
       // 折叠状态：跳过整个链的后续积木
       if (typeof DevMode !== 'undefined' && DevMode.isCollapsed(blk.id)) {
-        BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
+        if (_isBlockVisible(blk, vpBounds)) {
+          BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
+        }
         drawn.add(blk.id);
         // 跳过整条链
         let cur = blk.flowOut;
@@ -144,7 +135,10 @@ const EditorCanvas = (function () {
         }
         return;
       }
-      BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
+      // 每个积木独立检查可见性，不跳过后续链
+      if (_isBlockVisible(blk, vpBounds)) {
+        BlockRenderer.drawBlock(ctx, blk, selectedBlock === blk.id || selectedBlocks.includes(blk.id), hoveredPort);
+      }
       drawn.add(blk.id);
       // 绘制 C 型槽子积木链（子积木保持原位，在各自位置绘制）
       if (blk.subBlocks) {

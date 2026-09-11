@@ -22,6 +22,12 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg-primary); color:var(--text-primary); overflow:hidden; height:100vh; display:flex; flex-direction:column; user-select:none; }
 
+/* Allow text selection in input fields */
+input, textarea, [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Titlebar */
 #titlebar { height: 32px; background: var(--bg-secondary); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .titlebar-drag { display: flex; align-items: center; gap: 8px; padding-left: 12px; flex: 1; -webkit-app-region: drag; }
@@ -57,7 +63,7 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
 .toolbar-right span { font-size:12px; color:var(--text-secondary); }
 
 /* Modal overlay (for AddNodeDialog fallback etc.) */
-.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; backdrop-filter:blur(4px); }
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; backdrop-filter:blur(4px); user-select:text; -webkit-user-select:text; }
 .modal-overlay.hidden { display:none; }
 .modal-content { background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
 .modal-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
@@ -259,7 +265,7 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
 .add-node-empty { grid-column:1/-1; text-align:center; color:var(--text-muted); padding:24px 0; font-size:12px; }
 
 /* Scene Type Selection Dialog (新建场景类型选择) */
-.scene-type-dialog { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:10000; backdrop-filter:blur(4px); }
+.scene-type-dialog { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:10000; backdrop-filter:blur(4px); user-select:text; -webkit-user-select:text; }
 .scene-type-dialog-box { background:var(--bg-secondary,#181825); border:1px solid var(--border,#45475a); border-radius:12px; padding:24px; min-width:360px; max-width:440px; box-shadow:0 12px 40px rgba(0,0,0,0.5); }
 .scene-type-dialog-box h3 { margin:0 0 16px; font-size:15px; color:var(--accent,#89b4fa); }
 .scene-type-dialog-box p { margin:0 0 12px; font-size:12px; color:var(--text-secondary,#a6adc8); }
@@ -285,9 +291,9 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
 .ctx-item:hover { background:var(--bg-hover); }
 
 /* Dialog */
-.dialog-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:2000; backdrop-filter:blur(4px); }
+.dialog-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:2000; backdrop-filter:blur(4px); user-select:text; -webkit-user-select:text; }
 .dialog-overlay.hidden { display:none; }
-.dialog-box { background:var(--bg-surface); border:1px solid var(--border); border-radius:12px; padding:32px; text-align:center; max-width:400px; }
+.dialog-box { background:var(--bg-surface); border:1px solid var(--border); border-radius:12px; padding:32px; text-align:center; max-width:400px; user-select:text; -webkit-user-select:text; }
 .dialog-box h2 { margin-bottom:8px; color:var(--accent); }
 .dialog-box p { color:var(--text-secondary); margin-bottom:24px; font-size:14px; }
 .dialog-actions { display:flex; gap:12px; justify-content:center; }
@@ -464,6 +470,8 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
   justify-content: center;
   z-index: 3000;
   backdrop-filter: blur(3px);
+  user-select: text;
+  -webkit-user-select: text;
 }
 .custom-prompt-box {
   background: var(--bg-surface);
@@ -473,6 +481,8 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
   min-width: 320px;
   max-width: 420px;
   box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  user-select: text;
+  -webkit-user-select: text;
 }
 .custom-prompt-title {
   font-size: 14px;
@@ -486,6 +496,7 @@ body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:var(--bg
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
+  user-select: text;
   font-size: 13px;
   padding: 8px 12px;
   outline: none;
