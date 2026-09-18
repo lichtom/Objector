@@ -258,6 +258,62 @@
     </div>
   </div>
 
+  <!-- 新建项目弹窗 -->
+  <div id="new-project-dialog" class="dialog-overlay hidden">
+    <div class="dialog-box" style="max-width:480px;width:90%;">
+      <h2 data-i18n="home.newProject">+ 新建工程</h2>
+      <div style="display:flex;flex-direction:column;gap:14px;margin:16px 0;">
+        <!-- 项目名称 -->
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;" data-i18n="newProject.name">项目名称</label>
+          <input id="np-name" type="text" class="settings-input" style="width:100%;padding:8px 10px;font-size:13px;" placeholder="我的作品" />
+        </div>
+        <!-- 项目存放位置 -->
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;" data-i18n="newProject.location">项目存放位置</label>
+          <div style="display:flex;gap:6px;">
+            <input id="np-location" type="text" class="settings-input" style="flex:1;padding:8px 10px;font-size:12px;" placeholder="点击右侧按钮选择文件夹..." readonly />
+            <button id="np-browse" class="tb-btn" style="white-space:nowrap;">📂 浏览</button>
+          </div>
+        </div>
+        <!-- 项目类型 -->
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:8px;" data-i18n="newProject.type">项目类型</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+            <div class="np-type-card active" data-mode="normal">
+              <div style="font-size:20px;">🎮</div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">普通创作</div>
+            </div>
+            <div class="np-type-card" data-mode="advanced">
+              <div style="font-size:20px;">🎬</div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">高级创作</div>
+            </div>
+            <div class="np-type-card" data-mode="extension">
+              <div style="font-size:20px;">🧩</div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">扩展创作</div>
+            </div>
+            <div class="np-type-card" data-mode="data">
+              <div style="font-size:20px;">📊</div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">数据分析</div>
+            </div>
+            <div class="np-type-card" data-mode="minecraft">
+              <div style="font-size:20px;"><img src="../我的世界.png" style="width:24px;height:24px;object-fit:contain;"></div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">MC 模组</div>
+            </div>
+            <div class="np-type-card" data-mode="code">
+              <div style="font-size:20px;">💻</div>
+              <div style="font-size:11px;font-weight:600;margin-top:4px;">代码编程</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="np-cancel" class="tb-btn" data-i18n="dialog.cancel">取消</button>
+        <button id="np-create" class="tb-btn tb-run" data-i18n="newProject.create">创建项目</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 社区登录对话框 -->
   <div id="community-login-dialog" class="custom-prompt-overlay hidden">
     <div class="custom-prompt-box" style="max-width:380px;">

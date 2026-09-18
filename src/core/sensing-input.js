@@ -1,5 +1,6 @@
 /**
  * 侦测输入追踪器 - 追踪鼠标/键盘状态
+ * 支持本地画布输入和远程面板输入（IPC）
  */
 const SensingInput = (function () {
   let _mouseX = 0;
@@ -7,6 +8,7 @@ const SensingInput = (function () {
   let _mouseDown = false;
   let _keysDown = {};  // key -> true
   let _timerStart = Date.now();
+  let _spriteClickCallbacks = [];  // 精灵点击回调列表
 
   function init(canvasEl) {
     // 鼠标移动
@@ -30,6 +32,43 @@ const SensingInput = (function () {
     document.addEventListener('keyup', (e) => {
       const mapped = mapKey(e.key);
       _keysDown[mapped] = false;
+    });
+  }
+
+  // 直接设置状态（用于面板模式）
+  function _setMouse(x, y) {
+    _mouseX = x;
+    _mouseY = y;
+  }
+
+  function _setMouseDown(down) {
+    _mouseDown = down;
+  }
+
+  function _setKey(key, down) {
+    _keysDown[key] = down;
+  }
+
+  /**
+   * 从舞台面板 IPC 初始化输入监听
+   */
+  function initFromPanel() {
+    if (!window.api || !window.api.onPanelInput) return;
+    window.api.onPanelInput((type, data) => {
+      if (type === 'mouse-move') {
+        _mouseX = data.x;
+        _mouseY = data.y;
+      } else if (type === 'mouse-down') {
+        _mouseDown = true;
+      } else if (type === 'mouse-up') {
+        _mouseDown = false;
+      } else if (type === 'key-down') {
+        _keysDown[data.key] = true;
+      } else if (type === 'key-up') {
+        _keysDown[data.key] = false;
+      } else if (type === 'sprite-click') {
+        _spriteClickCallbacks.forEach(cb => cb(data.index));
+      }
     });
   }
 
@@ -59,8 +98,17 @@ const SensingInput = (function () {
     _timerStart = Date.now();
   }
 
+  /**
+   * 注册精灵点击回调
+   */
+  function onSpriteClick(callback) {
+    _spriteClickCallbacks.push(callback);
+  }
+
   return {
-    init, getMouseX, getMouseY, isMouseDown, isKeyPressed,
-    getTimer, resetTimer, _mapKey: mapKey,
+    init, initFromPanel, getMouseX, getMouseY, isMouseDown, isKeyPressed,
+    getTimer, resetTimer, onSpriteClick, _mapKey: mapKey,
+    // 面板模式直接设置状态
+    _setMouse, _setMouseDown, _setKey,
   };
 })();

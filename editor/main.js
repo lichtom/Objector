@@ -11,6 +11,13 @@ let mainWindow;
 let editorWindow;
 let _pendingEditorInit = null;
 
+// 独立面板窗口
+let _panelStageWin = null;
+let _panelSpritesWin = null;
+let _panelOutputWin = null;
+let _panelAudioWin = null;
+let _panelEditorSender = null;  // 记录编辑器 webContents
+
 // ========== 命令行参数解析（右键菜单 / 文件关联） ==========
 let _startupProjectPath = null;
 
@@ -118,6 +125,8 @@ function createEditorWindow(projectPath, mode, renderMode) {
 
   editorWindow.on('closed', () => {
     editorWindow = null;
+    // 编辑器关闭时同时关闭所有面板窗口
+    _closeAllPanels();
     // 编辑器关闭后恢复主页窗口
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
@@ -139,6 +148,148 @@ app.whenReady().then(() => {
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+
+// ========== 面板窗口管理 ==========
+function _createPanelWin(type, width, height) {
+  const win = new BrowserWindow({
+    width, height,
+    minWidth: 200, minHeight: 150,
+    title: 'Objector - ' + ({stage:'舞台',sprites:'角色',output:'输出',audio:'音频'}[type] || type),
+    icon: APP_ICON,
+    backgroundColor: '#1e1e1e',
+    frame: false,
+    parent: null,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    autoHideMenuBar: true,
+  });
+  const url = `file://${path.join(__dirname, 'panel.html')}?type=${type}`;
+  win.loadURL(url);
+  win.on('closed', () => {
+    if (type === 'stage') _panelStageWin = null;
+    if (type === 'sprites') _panelSpritesWin = null;
+    if (type === 'output') _panelOutputWin = null;
+    if (type === 'audio') _panelAudioWin = null;
+  });
+  return win;
+}
+
+function _closeAllPanels() {
+  [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin].forEach(w => {
+    if (w && !w.isDestroyed()) w.close();
+  });
+  _panelStageWin = null;
+  _panelSpritesWin = null;
+  _panelOutputWin = null;
+  _panelAudioWin = null;
+}
+
+// IPC: 打开4个面板窗口
+ipcMain.handle('open-panels', async (e) => {
+  _panelEditorSender = e.sender;
+  if (!_panelStageWin || _panelStageWin.isDestroyed()) {
+    _panelStageWin = _createPanelWin('stage', 520, 420);
+  }
+  if (!_panelSpritesWin || _panelSpritesWin.isDestroyed()) {
+    _panelSpritesWin = _createPanelWin('sprites', 350, 450);
+  }
+  if (!_panelOutputWin || _panelOutputWin.isDestroyed()) {
+    _panelOutputWin = _createPanelWin('output', 450, 300);
+  }
+  if (!_panelAudioWin || _panelAudioWin.isDestroyed()) {
+    _panelAudioWin = _createPanelWin('audio', 350, 350);
+  }
+  return true;
+});
+
+// IPC: 关闭面板窗口
+ipcMain.handle('close-panels', async () => {
+  _closeAllPanels();
+  return true;
+});
+
+// IPC: 显示/聚焦单个面板窗口
+ipcMain.handle('show-panel', async (e, type) => {
+  _panelEditorSender = e.sender;
+  const sizes = { stage: [520, 420], sprites: [350, 450], output: [450, 300], audio: [350, 350] };
+  let win = null;
+  if (type === 'stage') win = _panelStageWin;
+  else if (type === 'sprites') win = _panelSpritesWin;
+  else if (type === 'output') win = _panelOutputWin;
+  else if (type === 'audio') win = _panelAudioWin;
+
+  if (win && !win.isDestroyed()) {
+    // 窗口已存在，显示并聚焦
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } else {
+    // 窗口不存在，创建新窗口
+    const [w, h] = sizes[type] || [400, 350];
+    win = _createPanelWin(type, w, h);
+    if (type === 'stage') _panelStageWin = win;
+    else if (type === 'sprites') _panelSpritesWin = win;
+    else if (type === 'output') _panelOutputWin = win;
+    else if (type === 'audio') _panelAudioWin = win;
+  }
+  return true;
+});
+
+// IPC: 编辑器 -> 面板（转发更新数据）
+ipcMain.on('panel-update', (_e, data) => {
+  const targets = [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin];
+  targets.forEach(w => {
+    if (w && !w.isDestroyed()) {
+      w.webContents.send('panel-update', data);
+    }
+  });
+});
+
+// IPC: 面板 -> 编辑器（转发用户操作）
+ipcMain.on('panel-action', (_e, action, data) => {
+  if (_panelEditorSender && !_panelEditorSender.isDestroyed()) {
+    _panelEditorSender.send('panel-action', action, data);
+  }
+});
+
+// ========== 面板窗口控制 IPC ==========
+function _getPanelWinFromSender(sender) {
+  const allPanels = [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin];
+  return allPanels.find(w => w && !w.isDestroyed() && w.webContents === sender) || null;
+}
+
+ipcMain.on('panel-set-always-on-top', (e, flag) => {
+  const win = _getPanelWinFromSender(e.sender);
+  if (win) win.setAlwaysOnTop(flag);
+});
+
+ipcMain.on('panel-minimize', (e) => {
+  const win = _getPanelWinFromSender(e.sender);
+  if (win) win.minimize();
+});
+
+ipcMain.on('panel-maximize', (e) => {
+  const win = _getPanelWinFromSender(e.sender);
+  if (win) {
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  }
+});
+
+ipcMain.on('panel-close', (e) => {
+  const win = _getPanelWinFromSender(e.sender);
+  if (win) win.close();
+});
+
+// 面板输入转发：舞台窗口 → 编辑器
+ipcMain.on('panel-input', (_e, type, data) => {
+  if (_panelEditorSender && !_panelEditorSender.isDestroyed()) {
+    _panelEditorSender.send('panel-input', type, data);
+  }
+});
 
 // IPC: 打开编辑器窗口
 ipcMain.handle('open-editor', async (_e, projectPath, mode, renderMode) => {

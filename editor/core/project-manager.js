@@ -45,6 +45,9 @@ const ProjectManager = (function () {
       await window.api.writeFile(newPath + '/project.json', JSON.stringify(config, null, 2));
     }
 
+    // 同步更新右侧窗口标题中的项目名
+    document.querySelectorAll('.rwin-pname').forEach(el => { el.textContent = trimmed; });
+
     // 同步更新"最近项目"列表中的路径和名称
     _updateRecentProject(oldPath, newPath, trimmed);
 

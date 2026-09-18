@@ -84,4 +84,21 @@ contextBridge.exposeInMainWorld('api', {
   // 编辑器窗口接收积木请求
   onAIRequestBlocks: (callback) => ipcRenderer.on('ai-request-blocks', () => callback()),
   aiBlocksResponse: (blocks) => ipcRenderer.send('ai-blocks-response', blocks),
+
+  // ========== 独立面板窗口 ==========
+  openPanels: () => ipcRenderer.invoke('open-panels'),
+  closePanels: () => ipcRenderer.invoke('close-panels'),
+  showPanel: (type) => ipcRenderer.invoke('show-panel', type),
+  sendPanelUpdate: (data) => ipcRenderer.send('panel-update', data),
+  onPanelUpdate: (callback) => ipcRenderer.on('panel-update', (_e, data) => callback(data)),
+  panelAction: (action, data) => ipcRenderer.send('panel-action', action, data),
+  onPanelAction: (callback) => ipcRenderer.on('panel-action', (_e, action, data) => callback(action, data)),
+  // 面板窗口控制
+  panelSetAlwaysOnTop: (flag) => ipcRenderer.send('panel-set-always-on-top', flag),
+  panelMinimize: () => ipcRenderer.send('panel-minimize'),
+  panelMaximize: () => ipcRenderer.send('panel-maximize'),
+  panelClose: () => ipcRenderer.send('panel-close'),
+  // 面板输入：舞台窗口 → 编辑器
+  panelInput: (type, data) => ipcRenderer.send('panel-input', type, data),
+  onPanelInput: (callback) => ipcRenderer.on('panel-input', (_e, type, data) => callback(type, data)),
 });

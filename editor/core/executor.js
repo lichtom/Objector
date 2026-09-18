@@ -14,7 +14,6 @@ const Executor = (function () {
   let _timers = [];
   let _broadcastListeners = [];
   let _turboMode = 0;  // turbo 嵌套计数器，>0 表示处于 turbo 模式
-  let _spriteClickHandler = null;  // 精灵点击事件处理器
   let _savedBlocks = null;  // 保存编辑器状态的积木（运行时用全部精灵积木替换）
   let _blockSpriteIdx = {};  // blockId → spriteIdx 映射（并发执行时恢复精灵上下文）
   let _postStartCallback = null;  // event_start 完成后调用的回调（用于执行 JS 脚本）
@@ -25,10 +24,26 @@ const Executor = (function () {
   /** 注册 event_start 完成后的回调（高级模式 JS 脚本在此执行） */
   function setPostStartCallback(cb) { _postStartCallback = cb; }
 
+  let _outputPushTimer = null;
+  function _scheduleOutputPush() {
+    if (_outputPushTimer) return;
+    _outputPushTimer = setTimeout(() => {
+      _outputPushTimer = null;
+      if (window.api && window.api.sendPanelUpdate) {
+        window.api.sendPanelUpdate({ type: 'output', action: 'set', text: _output.join('\n') });
+      }
+    }, 100); // 节流：最多每100ms推送一次到面板
+  }
+
   function log(msg) {
     _output.push(String(msg));
     const logEl = document.getElementById('output-log');
-    if (logEl) logEl.textContent = _output.join('\n');
+    if (logEl) {
+      logEl.textContent = _output.join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    // 节流推送到独立输出面板
+    _scheduleOutputPush();
   }
 
   /** 运行所有事件积木 */
@@ -41,13 +56,18 @@ const Executor = (function () {
     _output = [];
     _turboMode = 0;
 
-    document.getElementById('btn-run').disabled = true;
-    document.getElementById('btn-stop').disabled = false;
-    EditorState.running = true;
-    document.getElementById('status-text').textContent = i18n.isEnglish() ? 'Running...' : '运行中...';
+    // 面板模式下这些元素不存在，跳过
+    const btnRun = document.getElementById('btn-run');
+    const btnStop = document.getElementById('btn-stop');
+    const statusText = document.getElementById('status-text');
+    if (btnRun) btnRun.disabled = true;
+    if (btnStop) btnStop.disabled = false;
+    if (typeof EditorState !== 'undefined') {
+      EditorState.running = true;
+    }
+    if (statusText) statusText.textContent = (typeof i18n !== 'undefined' && i18n.isEnglish()) ? 'Running...' : '运行中...';
 
-    // 切换到输出面板
-    switchTab('output');
+    // 输出面板始终可见（堆叠布局）
 
     try {
       // 运行时使用所有精灵的积木（而非仅当前精灵）
@@ -122,38 +142,18 @@ const Executor = (function () {
     // 广播触发时需要设置正确的精灵索引
     const broadcastBlockSpriteIdx = _blockSpriteIdx;
 
-    // 注册精灵点击事件
+    // 注册精灵点击事件（通过 SensingInput 回调，支持舞台面板 IPC 输入）
     const spriteClickBlocks = Object.values(EditorState.blocks).filter(b => b.type === 'event_sprite_clicked');
-    if (spriteClickBlocks.length > 0) {
-      const stageCanvas = document.getElementById('stage-canvas');
-      if (stageCanvas) {
-        _spriteClickHandler = (e) => {
-          if (_stopRequested || !_running) return;
-          const rect = stageCanvas.getBoundingClientRect();
-          const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-          const wx = Math.round(sx / rect.width * StageManager.STAGE_W - StageManager.STAGE_W / 2);
-          const wy = Math.round(sy / rect.height * StageManager.STAGE_H - StageManager.STAGE_H / 2);
-          // 检测点击了哪个精灵
-          const sprites = StageManager.getSprites();
-          for (let i = sprites.length - 1; i >= 0; i--) {
-            const s = sprites[i];
-            if (!s.visible) continue;
-            const dx = wx - s.x, dy = wy - s.y;
-            const hitRadius = 30 * (s.size / 100);
-            if (dx * dx + dy * dy <= hitRadius * hitRadius) {
-              // 点击了精灵 i
-              StageManager.setActiveSprite(i);
-              spriteClickBlocks.forEach(b => {
-                const si = _blockSpriteIdx[b.id];
-                if (si !== undefined) StageManager.setActiveSprite(si);
-                executeChain(b, {}).catch(err => log('精灵点击错误: ' + err.message));
-              });
-              break;
-            }
-          }
-        };
-        stageCanvas.addEventListener('click', _spriteClickHandler);
-      }
+    if (spriteClickBlocks.length > 0 && typeof SensingInput !== 'undefined') {
+      SensingInput.onSpriteClick((spriteIndex) => {
+        if (_stopRequested || !_running) return;
+        StageManager.setActiveSprite(spriteIndex);
+        spriteClickBlocks.forEach(b => {
+          const si = _blockSpriteIdx[b.id];
+          if (si !== undefined) StageManager.setActiveSprite(si);
+          executeChain(b, {}).catch(err => log('精灵点击错误: ' + err.message));
+        });
+      });
     }
 
     // 找到所有 event_start 积木并并发执行（每个精灵独立运行）
@@ -209,13 +209,6 @@ const Executor = (function () {
       _keyHandler = null;
     }
 
-    // 清理精灵点击
-    if (_spriteClickHandler) {
-      const stageCanvas = document.getElementById('stage-canvas');
-      if (stageCanvas) stageCanvas.removeEventListener('click', _spriteClickHandler);
-      _spriteClickHandler = null;
-    }
-
     _running = false;
     EditorState.running = false;
     // 退出执行模式，恢复编辑器状态
@@ -253,12 +246,6 @@ const Executor = (function () {
       if (_keyHandler._upHandler) document.removeEventListener('keyup', _keyHandler._upHandler);
       _keyHandler = null;
     }
-    // 立即清理精灵点击
-    if (_spriteClickHandler) {
-      const stageCanvas = document.getElementById('stage-canvas');
-      if (stageCanvas) stageCanvas.removeEventListener('click', _spriteClickHandler);
-      _spriteClickHandler = null;
-    }
     _running = false;
     if (typeof EditorState !== 'undefined') EditorState.running = false;
     if (typeof StageManager !== 'undefined' && StageManager.setExecuting) StageManager.setExecuting(false);
@@ -266,7 +253,7 @@ const Executor = (function () {
     document.getElementById('btn-run').disabled = false;
     document.getElementById('btn-stop').disabled = true;
     document.getElementById('status-text').textContent = '已强制停止';
-    console.log('[Executor] 强制停止完成');
+
   }
 
   /** 执行积木链 */

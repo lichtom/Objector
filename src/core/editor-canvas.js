@@ -1249,6 +1249,8 @@ const EditorCanvas = (function () {
 
   return {
     init, render, resize, addBlockFromPalette, getCanvas: () => canvas, screenToWorld,
+    getViewState: () => ({ x: offsetX, y: offsetY, scale }),
+    setViewState: (state) => { if (state) { offsetX = state.x || 0; offsetY = state.y || 0; scale = state.scale || 1; } },
     commitParamEdit: () => paramEditorState && commitParamEdit(),
     addListItem, removeListItem, addDynamicParam, removeDynamicParam,
     hasDynamicParams, editComment, toggleImportant, showGotoLabelDialog, jumpToBlock,

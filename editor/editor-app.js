@@ -76,14 +76,8 @@ window.EditorApp = (function () {
     });
   };
 
+  // switchTab kept as no-op for backward compatibility
   function switchTab(tab) {
-    document.querySelectorAll('.stage-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.stage-tab[data-tab="${tab}"]`)?.classList.add('active');
-    document.getElementById('stage-content').classList.toggle('hidden', tab !== 'stage');
-    document.getElementById('output-content').classList.toggle('hidden', tab !== 'output');
-    document.getElementById('sprites-content').classList.toggle('hidden', tab !== 'sprites');
-    document.getElementById('files-content').classList.toggle('hidden', tab !== 'files');
-    document.getElementById('debug-content').classList.toggle('hidden', tab !== 'debug');
     if (tab === 'debug') DevMode.refreshWatchPanel();
   }
   window.switchTab = switchTab;
@@ -253,6 +247,135 @@ window.EditorApp = (function () {
     setTimeout(() => {
       document.getElementById('status-text').textContent = i18n.t('status.ready');
     }, 2000);
+  }
+
+  /** 更新右侧3个窗口标题中的项目名 */
+  function updateRwinTitles() {
+    const name = EditorState.projectName || (i18n.isEnglish() ? 'Untitled' : '未命名项目');
+    document.querySelectorAll('.rwin-pname').forEach(el => { el.textContent = name; });
+  }
+
+  // ==================== 独立面板窗口通信 ====================
+  let _panelsOpened = false;
+  let _stagePushTimer = null; // 执行期间高频推送精灵数据到舞台面板
+  let _lastStageJSON = '';    // 脏检查：只在数据变化时发送
+
+  function _startStagePushTimer() {
+    if (_stagePushTimer) return;
+    _stagePushTimer = setInterval(() => { _pushPanelSprites(); }, 33); // ~30fps，足够流畅
+  }
+
+  function _stopStagePushTimer() {
+    if (_stagePushTimer) { clearInterval(_stagePushTimer); _stagePushTimer = null; }
+    _lastStageJSON = '';
+  }
+
+  /** 推送精灵数据到面板窗口（带脏检查） */
+  function _pushPanelSprites() {
+    if (!_panelsOpened || !window.api || !window.api.sendPanelUpdate) return;
+    const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
+    const activeIdx = (typeof StageManager !== 'undefined') ? StageManager.getActiveSpriteIdx() : 0;
+    // 轻量序列化：只包含关键字段用于脏检查
+    const quickCheck = sprites.map(s => `${s.x|0},${s.y|0},${s.direction|0},${s.visible?1:0},${s.sayText||''}`).join(';');
+    if (quickCheck === _lastStageJSON) return; // 数据没变，跳过发送
+    _lastStageJSON = quickCheck;
+    const data = sprites.map(s => ({
+      name: s.name, x: s.x || 0, y: s.y || 0,
+      direction: s.direction || 90, size: s.size || 100,
+      visible: s.visible !== false, color: s.color || '#4ec9b0',
+      rotationStyle: s.rotationStyle || 'allAround', sayText: s.sayText || '',
+      costumeDataUrl: s.costumeImage ? s.costumeImage.src : null,
+    }));
+    window.api.sendPanelUpdate({ type: 'stage', sprites: data });
+    window.api.sendPanelUpdate({ type: 'sprites', sprites: data, activeIdx });
+  }
+
+  /** 推送项目标题到面板 */
+  function _pushPanelTitle() {
+    if (!_panelsOpened || !window.api || !window.api.sendPanelUpdate) return;
+    window.api.sendPanelUpdate({ type: 'title', name: EditorState.projectName || '' });
+  }
+
+  /** 推送音频文件列表到面板 */
+  async function _pushAudioList() {
+    if (!_panelsOpened || !window.api || !window.api.sendPanelUpdate) return;
+    if (!EditorState.projectPath) return;
+    try {
+      const files = await window.api.listDir(EditorState.projectPath + '/sounds');
+      const audioFiles = (files || []).filter(f => /\.(mp3|wav|ogg|m4a|aac)$/i.test(f));
+      window.api.sendPanelUpdate({ type: 'audio-list', files: audioFiles });
+    } catch(e) {
+      window.api.sendPanelUpdate({ type: 'audio-list', files: [] });
+    }
+  }
+
+  /** 添加音频文件 */
+  async function _addAudioFile() {
+    if (!EditorState.projectPath) return;
+    const filePath = await window.api.selectAudioFile();
+    if (!filePath) return;
+    try {
+      const fileName = filePath.replace(/\\/g, '/').split('/').pop();
+      const dest = EditorState.projectPath + '/sounds/' + fileName;
+      await window.api.copyFile(filePath, dest);
+      if (typeof SoundManager !== 'undefined') {
+        await SoundManager.loadSound(dest);
+      }
+      _pushAudioList();
+    } catch(e) {
+      console.warn('[Audio] 添加音频失败:', e);
+    }
+  }
+
+  /** 删除音频文件 */
+  async function _deleteAudioFile(fileName) {
+    if (!EditorState.projectPath || !fileName) return;
+    try {
+      await window.api.deleteFile(EditorState.projectPath + '/sounds/' + fileName);
+      _pushAudioList();
+    } catch(e) {
+      console.warn('[Audio] 删除音频失败:', e);
+    }
+  }
+
+  /** 打开面板并监听操作（仅普通模式） */
+  function _initPanels() {
+    console.log('[Panel] _initPanels called, projectMode:', EditorState.projectMode, 'api:', !!window.api, 'openPanels:', !!(window.api && window.api.openPanels));
+    if (_panelsOpened) { console.log('[Panel] already opened, skip'); return; }
+    if (!window.api || !window.api.openPanels) { console.warn('[Panel] API not available'); return; }
+    if (EditorState.projectMode && EditorState.projectMode !== 'normal') { console.log('[Panel] not normal mode, skip'); return; }
+    console.log('[Panel] Opening panels...');
+    window.api.openPanels().then(() => {
+      _panelsOpened = true;
+      console.log('[Panel] Panels opened successfully');
+      setTimeout(() => { _pushPanelTitle(); _pushPanelSprites(); _pushAudioList(); }, 600);
+    }).catch(e => console.warn('[Panel] openPanels failed:', e));
+    // 监听面板操作
+    if (window.api.onPanelAction) {
+      window.api.onPanelAction((action, data) => {
+        if (action === 'select-sprite' && typeof StageManager !== 'undefined') {
+          StageManager.setActiveSprite(data); _pushPanelSprites();
+        } else if (action === 'add-sprite' && typeof StageManager !== 'undefined') {
+          const s = StageManager.addSprite((i18n.isEnglish() ? 'Sprite' : '精灵') + (StageManager.getSprites().length + 1));
+          const idx = StageManager.getSprites().indexOf(s);
+          if (idx >= 0) StageManager.setActiveSprite(idx);
+          _pushPanelSprites();
+        } else if (action === 'upload-costume' && typeof uploadCostumeDialog === 'function') uploadCostumeDialog();
+        else if (action === 'set-costume' && typeof setCostumeDialog === 'function') setCostumeDialog();
+        else if (action === 'clear-costume' && typeof clearCostume === 'function') clearCostume();
+        else if (action === 'clear-output') {
+          if (typeof Executor !== 'undefined') Executor.clearOutput();
+          const logEl = document.getElementById('output-log');
+          if (logEl) logEl.textContent = '';
+        }
+        // 音频面板操作
+        else if (action === 'request-audio-list') _pushAudioList();
+        else if (action === 'play-audio' && typeof SoundManager !== 'undefined') SoundManager.play(data);
+        else if (action === 'stop-all-audio' && typeof SoundManager !== 'undefined') SoundManager.stopAll();
+        else if (action === 'add-audio') _addAudioFile();
+        else if (action === 'delete-audio') _deleteAudioFile(data);
+      });
+    }
   }
 
   /** 显示项目所有代码文件 */
@@ -1646,11 +1769,13 @@ window.EditorApp = (function () {
       console.error('[初始化失败]', e);
     }
 
-    // 初始化侦测输入追踪（绑定到舞台画布）
+    // 初始化侦测输入追踪（绑定到舞台画布 + 面板 IPC）
     const stageCanvas = document.getElementById('stage-canvas');
     if (stageCanvas) {
       SensingInput.init(stageCanvas);
     }
+    // 从舞台面板接收 IPC 输入（鼠标/键盘）
+    SensingInput.initFromPanel();
 
     // 初始化扩展计时器
     window.__extTimerStart = Date.now();
@@ -1698,11 +1823,15 @@ window.EditorApp = (function () {
     // ==================== 菜单栏交互 ====================
     const _actionHome = () => {
       if (EditorState._isDirty) {
-        const msg = i18n.isEnglish() ? 'You have unsaved changes. Leave anyway?' : '您有未保存的更改，确定要离开吗？';
+        const msg = i18n.isEnglish() ? 'You have unsaved changes. Close anyway?' : '您有未保存的更改，确定要关闭吗？';
         if (!confirm(msg)) return;
       }
-      EditorState._isDirty = false;
-      window.location.href = 'index.html';
+      // 关闭窗口
+      if (window.api && window.api.windowClose) {
+        window.api.windowClose();
+      } else {
+        window.close();
+      }
     };
     const _actionSave = async () => {
       await ProjectManager.saveProject();
@@ -1711,19 +1840,35 @@ window.EditorApp = (function () {
     };
 
     const _actionRun = async () => {
+      // 始终在编辑器本地执行
       Executor.clearOutput();
-      document.getElementById('output-log').textContent = '';
-      // JS 脚本已通过 Executor.setPostStartCallback 注册，
-      // 会在 event_start 积木完成后、事件循环开始前自动执行
+      const outputLog = document.getElementById('output-log');
+      if (outputLog) outputLog.textContent = '';
+      // 清空面板输出
+      if (_panelsOpened && window.api && window.api.sendPanelUpdate) {
+        window.api.sendPanelUpdate({ type: 'output', action: 'set', text: '' });
+      }
+      // 启动高频推送精灵数据到舞台面板（~60fps）
+      _startStagePushTimer();
+      // 本地执行
       await Executor.run();
+      // 执行完成后停止推送
+      _stopStagePushTimer();
+      // 最后一次推送确保最终状态同步
+      _pushPanelSprites();
     };
     const _actionStop = () => {
+      _stopStagePushTimer();
       Executor.stop();
       SoundManager.stopAll();
+      // 停止后最终推送一次
+      _pushPanelSprites();
     };
     const _actionForceStop = () => {
+      _stopStagePushTimer();
       Executor.forceStop();
       SoundManager.stopAll();
+      _pushPanelSprites();
     };
     const _actionExportHtml = async () => {
       try {
@@ -1731,6 +1876,202 @@ window.EditorApp = (function () {
         await HtmlExporter.exportProject();
       } catch(e) { alert('导出失败: ' + e.message); }
     };
+
+    // ==================== 积木转代码预览 ====================
+    let _codePreviewLang = 'javascript';
+    function showCodePreviewDialog() {
+      if (typeof BlockCodeConverter === 'undefined') { alert(i18n.isEnglish() ? 'BlockCodeConverter not loaded' : '代码转换器未加载'); return; }
+      const blocks = EditorState.blocks || {};
+      if (Object.keys(blocks).length === 0) { alert(i18n.isEnglish() ? 'No blocks to convert' : '没有积木可以转换'); return; }
+      const code = BlockCodeConverter.convertProject(blocks, _codePreviewLang);
+      const dialog = document.getElementById('code-preview-dialog');
+      const output = document.getElementById('code-preview-output');
+      output.textContent = code;
+      dialog.classList.remove('hidden');
+      // 更新按钮高亮
+      document.getElementById('code-preview-js').className = 'tb-btn' + (_codePreviewLang === 'javascript' ? ' tb-run' : '');
+      document.getElementById('code-preview-python').className = 'tb-btn' + (_codePreviewLang === 'python' ? ' tb-run' : '');
+    }
+    document.getElementById('code-preview-js')?.addEventListener('click', () => { _codePreviewLang = 'javascript'; showCodePreviewDialog(); });
+    document.getElementById('code-preview-python')?.addEventListener('click', () => { _codePreviewLang = 'python'; showCodePreviewDialog(); });
+    document.getElementById('code-preview-copy')?.addEventListener('click', () => {
+      const code = document.getElementById('code-preview-output')?.textContent || '';
+      navigator.clipboard.writeText(code).then(() => {
+        const btn = document.getElementById('code-preview-copy');
+        const orig = btn.textContent;
+        btn.textContent = i18n.isEnglish() ? '✅ Copied!' : '✅ 已复制';
+        setTimeout(() => btn.textContent = orig, 1500);
+      });
+    });
+    document.getElementById('code-preview-close')?.addEventListener('click', () => {
+      document.getElementById('code-preview-dialog')?.classList.add('hidden');
+    });
+
+    // ==================== 导入 Scratch .sb3 ====================
+    function importSB3File() {
+      if (typeof SB3Importer === 'undefined') { alert(i18n.isEnglish() ? 'SB3Importer not loaded' : 'SB3导入器未加载'); return; }
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.sb3';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const result = await SB3Importer.importFile(file);
+          if (result && result.blocks) {
+            // 合并导入的积木到当前项目
+            let count = 0;
+            for (const [id, block] of Object.entries(result.blocks)) {
+              EditorState.blocks[id] = block;
+              count++;
+            }
+            // 刷新画布
+            if (typeof EditorCanvas !== 'undefined') EditorCanvas.render();
+            EditorState._isDirty = true;
+            const msg = i18n.isEnglish() ? `Imported ${count} blocks from ${file.name}` : `已从 ${file.name} 导入 ${count} 个积木`;
+            document.getElementById('status-text').textContent = msg;
+          }
+        } catch (err) {
+          alert((i18n.isEnglish() ? 'Import failed: ' : '导入失败: ') + err.message);
+        }
+      };
+      input.click();
+    }
+
+    // ==================== 项目模板库 ====================
+    const PROJECT_TEMPLATES = [
+      {
+        id: 'empty', icon: '📄',
+        name: { zh: '空白项目', en: 'Blank Project' },
+        desc: { zh: '从零开始创建', en: 'Start from scratch' },
+        blocks: {}
+      },
+      {
+        id: 'move-keys', icon: '🎮',
+        name: { zh: '键盘控制移动', en: 'Keyboard Movement' },
+        desc: { zh: '用方向键控制角色移动', en: 'Control sprite with arrow keys' },
+        blocks: {
+          'tpl_ev1': { id: 'tpl_ev1', type: 'event_key_pressed', params: { key: 'ArrowUp' }, x: 100, y: 100, flowIn: null, flowOut: 'tpl_mv1' },
+          'tpl_mv1': { id: 'tpl_mv1', type: 'change_y', params: { dy: 10 }, flowIn: 'tpl_ev1', flowOut: null }
+        }
+      },
+      {
+        id: 'bounce', icon: '🏀',
+        name: { zh: '弹球动画', en: 'Bouncing Ball' },
+        desc: { zh: '角色碰到边缘弹回', en: 'Sprite bounces at edges' },
+        blocks: {
+          'tpl_ev2': { id: 'tpl_ev2', type: 'event_start', params: {}, x: 100, y: 100, flowIn: null, flowOut: 'tpl_for1' },
+          'tpl_for1': { id: 'tpl_for1', type: 'control_forever', params: {}, subBlocks: { body: 'tpl_mv2' }, flowIn: 'tpl_ev2', flowOut: null },
+          'tpl_mv2': { id: 'tpl_mv2', type: 'move_steps', params: { steps: 5 }, flowIn: null, flowOut: 'tpl_bnc1' },
+          'tpl_bnc1': { id: 'tpl_bnc1', type: 'bounce_edge', params: {}, flowIn: 'tpl_mv2', flowOut: null }
+        }
+      },
+      {
+        id: 'say-hello', icon: '💬',
+        name: { zh: '打招呼', en: 'Say Hello' },
+        desc: { zh: '角色说话并等待', en: 'Sprite says hello and waits' },
+        blocks: {
+          'tpl_ev3': { id: 'tpl_ev3', type: 'event_start', params: {}, x: 100, y: 100, flowIn: null, flowOut: 'tpl_say1' },
+          'tpl_say1': { id: 'tpl_say1', type: 'looks_say', params: { text: 'Hello!', sec: 2 }, flowIn: 'tpl_ev3', flowOut: null }
+        }
+      },
+      {
+        id: 'click-counter', icon: '🔢',
+        name: { zh: '点击计数器', en: 'Click Counter' },
+        desc: { zh: '点击角色计数', en: 'Count clicks on sprite' },
+        blocks: {
+          'tpl_ev4': { id: 'tpl_ev4', type: 'event_sprite_clicked', params: {}, x: 100, y: 100, flowIn: null, flowOut: 'tpl_var1' },
+          'tpl_var1': { id: 'tpl_var1', type: 'var_change', params: { name: 'count', delta: 1 }, flowIn: 'tpl_ev4', flowOut: null }
+        }
+      },
+      {
+        id: 'follow-mouse', icon: '🖱️',
+        name: { zh: '跟随鼠标', en: 'Follow Mouse' },
+        desc: { zh: '角色跟随鼠标移动', en: 'Sprite follows the mouse' },
+        blocks: {
+          'tpl_ev5': { id: 'tpl_ev5', type: 'event_start', params: {}, x: 100, y: 100, flowIn: null, flowOut: 'tpl_for2' },
+          'tpl_for2': { id: 'tpl_for2', type: 'control_forever', params: {}, subBlocks: { body: 'tpl_goto_mouse' }, flowIn: 'tpl_ev5', flowOut: null },
+          'tpl_goto_mouse': { id: 'tpl_goto_mouse', type: 'go_to_mouse', params: {}, flowIn: null, flowOut: null }
+        }
+      }
+    ];
+
+    function showTemplateDialog() {
+      const dialog = document.getElementById('template-dialog');
+      const list = document.getElementById('template-list');
+      list.innerHTML = '';
+      const isEn = i18n.isEnglish();
+      PROJECT_TEMPLATES.forEach(tpl => {
+        const card = document.createElement('div');
+        card.style.cssText = 'padding:14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .2s;';
+        card.innerHTML = `<div style="font-size:24px;margin-bottom:6px;">${tpl.icon}</div>
+          <div style="font-weight:600;font-size:13px;">${isEn ? tpl.name.en : tpl.name.zh}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${isEn ? tpl.desc.en : tpl.desc.zh}</div>`;
+        card.addEventListener('mouseenter', () => card.style.borderColor = 'var(--accent)');
+        card.addEventListener('mouseleave', () => card.style.borderColor = 'var(--border)');
+        card.addEventListener('click', () => loadTemplate(tpl));
+        list.appendChild(card);
+      });
+      dialog.classList.remove('hidden');
+    }
+
+    function loadTemplate(tpl) {
+      document.getElementById('template-dialog')?.classList.add('hidden');
+      // 清空当前积木并加载模板
+      EditorState.blocks = JSON.parse(JSON.stringify(tpl.blocks));
+      if (typeof EditorCanvas !== 'undefined') EditorCanvas.render();
+      EditorState._isDirty = true;
+      const isEn = i18n.isEnglish();
+      document.getElementById('status-text').textContent = isEn ? `Template loaded: ${tpl.name.en}` : `已加载模板: ${tpl.name.zh}`;
+    }
+
+    document.getElementById('template-close')?.addEventListener('click', () => {
+      document.getElementById('template-dialog')?.classList.add('hidden');
+    });
+
+    // ==================== 变量监视面板 ====================
+    let _monitorVisible = false;
+    let _monitorTimer = null;
+
+    function toggleVariablesMonitor() {
+      _monitorVisible = !_monitorVisible;
+      const panel = document.getElementById('variables-monitor');
+      if (_monitorVisible) {
+        panel.classList.remove('hidden');
+        updateVariablesMonitor();
+        // 定时刷新
+        if (!_monitorTimer) {
+          _monitorTimer = setInterval(updateVariablesMonitor, 500);
+        }
+      } else {
+        panel.classList.add('hidden');
+        if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
+      }
+    }
+
+    function updateVariablesMonitor() {
+      const content = document.getElementById('monitor-content');
+      if (!content || !_monitorVisible) return;
+      const vars = (typeof Executor !== 'undefined' && Executor._getGlobalVars) ? Executor._getGlobalVars() : {};
+      const keys = Object.keys(vars).filter(k => !k.startsWith('__'));
+      if (keys.length === 0) {
+        const isEn = i18n.isEnglish();
+        content.innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:12px;">${isEn ? 'Run project to see variable values' : '运行项目后显示变量值'}</div>`;
+        return;
+      }
+      let html = '';
+      for (const key of keys) {
+        const val = vars[key];
+        const displayVal = Array.isArray(val) ? JSON.stringify(val) : String(val);
+        html += `<div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:4px;margin-bottom:2px;background:var(--bg-tertiary);">
+          <span style="color:var(--accent);font-weight:500;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${key}">${key}</span>
+          <span style="color:var(--text-primary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${displayVal}">${displayVal}</span>
+        </div>`;
+      }
+      content.innerHTML = html;
+    }
+
+    document.getElementById('monitor-close')?.addEventListener('click', () => toggleVariablesMonitor());
 
     const menuActions = {
       'home': _actionHome,
@@ -1751,6 +2092,10 @@ window.EditorApp = (function () {
       'collab-push-branch': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.pushToBranch(),
       'collab-view-members': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.viewMembers(),
       'collab-share-link': () => typeof CollaborationManager !== 'undefined' && CollaborationManager.generateShareLink(),
+      'code-preview': () => showCodePreviewDialog(),
+      'import-sb3': () => importSB3File(),
+      'show-templates': () => showTemplateDialog(),
+      'toggle-monitor': () => toggleVariablesMonitor(),
     };
 
     // 菜单栏下拉交互
@@ -1798,6 +2143,19 @@ window.EditorApp = (function () {
       } else {
         alert('AI 助手模块未加载');
       }
+    });
+
+    // 面板窗口快捷按钮
+    ['stage', 'sprites', 'output', 'audio'].forEach(type => {
+      document.getElementById('btn-panel-' + type)?.addEventListener('click', () => {
+        if (window.api && window.api.showPanel) {
+          window.api.showPanel(type);
+          // 确保数据推送
+          if (type === 'stage' || type === 'sprites') setTimeout(() => _pushPanelSprites(), 300);
+          if (type === 'audio') setTimeout(() => _pushAudioList(), 300);
+          setTimeout(() => _pushPanelTitle(), 300);
+        }
+      });
     });
 
     document.getElementById('btn-cmd')?.addEventListener('click', () => {
@@ -1932,20 +2290,17 @@ window.EditorApp = (function () {
     document.getElementById('btn-debug-step')?.addEventListener('click', () => DevMode.stepExecution());
     document.getElementById('btn-debug-stop')?.addEventListener('click', () => DevMode.stopDebug());
 
-    // 舞台标签切换
-    document.querySelectorAll('.stage-tab').forEach(tab => {
-      tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-    });
+    // 舞台标签切换已移除（堆叠布局）
 
-    // 精灵面板按钮
-    document.getElementById('btn-add-sprite').addEventListener('click', () => {
+    // 精灵面板按钮（元素在隐藏面板中，用可选链）
+    document.getElementById('btn-add-sprite')?.addEventListener('click', () => {
       const s = StageManager.addSprite((i18n.isEnglish() ? 'Sprite' : '精灵') + (StageManager.getSprites().length + 1));
       const idx = StageManager.getSprites().indexOf(s);
       if (idx >= 0) StageManager.setActiveSprite(idx);
     });
-    document.getElementById('btn-upload-costume').addEventListener('click', uploadCostumeDialog);
-    document.getElementById('btn-set-costume').addEventListener('click', setCostumeDialog);
-    document.getElementById('btn-clear-costume').addEventListener('click', clearCostume);
+    document.getElementById('btn-upload-costume')?.addEventListener('click', uploadCostumeDialog);
+    document.getElementById('btn-set-costume')?.addEventListener('click', setCostumeDialog);
+    document.getElementById('btn-clear-costume')?.addEventListener('click', clearCostume);
 
     // 键盘快捷键
     document.addEventListener('keydown', (e) => {
@@ -1994,6 +2349,8 @@ window.EditorApp = (function () {
       const spriteName = sprite ? sprite.name : '';
       document.getElementById('block-count').textContent =
         (i18n.isEnglish() ? spriteName + ': ' : spriteName + '：') + count + (i18n.isEnglish() ? ' blocks' : ' 个积木');
+      // 推送面板更新
+      _pushPanelSprites();
       // 检测积木数据变化，标记未保存状态并记录历史
       const snapshot = JSON.stringify(EditorState.blocks || {});
       if (snapshot !== EditorState._blocksSnapshot) {
@@ -2206,6 +2563,9 @@ window.EditorApp = (function () {
     EditorState.projectMode = config.mode || mode || 'normal';
     document.getElementById('project-name').textContent = EditorState.projectName;
 
+    // 更新右侧窗口标题中的项目名
+    updateRwinTitles();
+
     // 初始化造型管理器（从项目 assets 目录加载）
     try {
       await CostumeManager.init(folder);
@@ -2244,8 +2604,8 @@ window.EditorApp = (function () {
     // 扩展模式：显示文件标签页
     if (EditorState.projectMode === 'extension') {
       document.getElementById('stage-panel').classList.add('extension-mode');
-      const fileTab = document.querySelector('.stage-tab[data-tab="files"]');
-      if (fileTab) fileTab.classList.remove('hidden');
+      const filesEl = document.getElementById('files-content');
+      if (filesEl) filesEl.classList.remove('hidden');
       FileEditor.refreshFileList();
     }
 
@@ -2453,6 +2813,9 @@ window.EditorApp = (function () {
     } catch(e) {
       console.error('[项目加载失败]', e);
       document.getElementById('status-text').textContent = i18n.t('status.loadFailed', null).replace('{error}', e.message);
+    } finally {
+      // 无论加载是否完全成功，都尝试打开面板（仅普通模式）
+      try { _initPanels(); } catch(e) { console.error('[Panel] initPanels error:', e); }
     }
   }
 

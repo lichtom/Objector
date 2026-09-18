@@ -323,17 +323,32 @@
   function hideLanguageDialog() {
     document.getElementById('language-dialog').classList.add('hidden');
   }
+
+  // 新建项目弹窗
+  let _npSelectedMode = 'normal';
+  function showNewProjectDialog() {
+    _npSelectedMode = 'normal';
+    document.getElementById('np-name').value = i18n.isEnglish() ? 'My Project' : '我的作品';
+    document.getElementById('np-location').value = '';
+    document.getElementById('np-location').dataset.path = '';
+    document.querySelectorAll('.np-type-card').forEach(c => c.classList.remove('active'));
+    document.querySelector('.np-type-card[data-mode="normal"]')?.classList.add('active');
+    document.getElementById('new-project-dialog').classList.remove('hidden');
+    document.getElementById('np-name').focus();
+    document.getElementById('np-name').select();
+  }
+  function hideNewProjectDialog() {
+    document.getElementById('new-project-dialog').classList.add('hidden');
+  }
   
-  /** 新建工程（通过模式弹窗）：选择父文件夹，在其中创建“我的作品”子目录 */
-  async function createNewProject(mode, renderMode) {
-    hideModeDialog();
-    hideRenderModeDialog();
-    const parentFolder = await window.api.selectFolder();
+  /** 新建工程：指定名称、位置、类型创建项目 */
+  async function createNewProject(projectName, parentFolder, mode, renderMode) {
     if (!parentFolder) return;
+    if (!projectName) projectName = i18n.t('app.myWork');
   
-    // 在选中的父文件夹下创建"我的作品"子目录（自动检测路径分隔符）
+    // 在选中的父文件夹下创建项目目录（自动检测路径分隔符）
     const sep = parentFolder.includes('\\') ? '\\' : '/';
-    const folder = parentFolder + sep + i18n.t('app.myWork');
+    const folder = parentFolder + sep + projectName;
   
     // 创建项目结构
     mode = mode || 'normal';
@@ -345,8 +360,7 @@
     if (mode === 'extension') {
       await window.api.ensureDir(folder + '/extensions');
     }
-  
-    const projectName = i18n.t('app.myWork');
+
     const config = {
       name: projectName,
       version: '1.0',
@@ -387,7 +401,7 @@
     });
 
     // 主页按钮事件
-    document.getElementById('home-btn-new').addEventListener('click', showModeDialog);
+    document.getElementById('home-btn-new').addEventListener('click', showNewProjectDialog);
     document.getElementById('home-btn-open').addEventListener('click', async () => {
       const folder = await window.api.selectFolder();
       if (folder) {
@@ -534,24 +548,15 @@
       card.addEventListener('click', () => {
         const mode = card.dataset.mode;
         if (mode === 'normal') {
-          // 普通创作显示渲染模式子选择
           hideModeDialog();
           showRenderModeDialog();
-        } else if (mode === 'advanced') {
-          // 高级创作：默认 2D 模式，进入 Godot 式编辑器
-          createNewProject('advanced', '2d');
-        } else if (mode === 'data') {
-          // 数据分析模式
-          createNewProject('data', '2d');
-        } else if (mode === 'minecraft') {
-          // Minecraft 模组开发模式
-          createNewProject('minecraft', '2d');
         } else if (mode === 'code') {
-          // 代码编程模式：显示语言选择
           hideModeDialog();
           showLanguageDialog();
         } else {
-          createNewProject(mode, '2d');
+          hideModeDialog();
+          const folder = window.api.selectFolderSync ? window.api.selectFolderSync() : null;
+          if (folder) createNewProject(null, folder, mode, '2d');
         }
       });
     });
@@ -562,8 +567,8 @@
       card.addEventListener('click', () => {
         const lang = card.dataset.lang;
         hideLanguageDialog();
-        // 所有语言直接进入代码编辑器
-        createNewProject('code-' + lang, '2d');
+        const folder = window.api.selectFolderSync ? window.api.selectFolderSync() : null;
+        if (folder) createNewProject(null, folder, 'code-' + lang, '2d');
       });
     });
     document.getElementById('language-cancel').addEventListener('click', hideLanguageDialog);
@@ -572,10 +577,42 @@
     document.querySelectorAll('#render-mode-dialog .mode-card').forEach(card => {
       card.addEventListener('click', () => {
         hideRenderModeDialog();
-        createNewProject('normal', card.dataset.render);
+        const folder = window.api.selectFolderSync ? window.api.selectFolderSync() : null;
+        if (folder) createNewProject(null, folder, 'normal', card.dataset.render);
       });
     });
     document.getElementById('render-mode-cancel').addEventListener('click', hideRenderModeDialog);
+
+    // ============ 新建项目弹窗 ============
+    document.getElementById('np-browse').addEventListener('click', async () => {
+      const folder = await window.api.selectFolder();
+      if (folder) {
+        document.getElementById('np-location').value = folder;
+        document.getElementById('np-location').dataset.path = folder;
+      }
+    });
+    document.querySelectorAll('.np-type-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.np-type-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        _npSelectedMode = card.dataset.mode;
+      });
+    });
+    document.getElementById('np-cancel').addEventListener('click', hideNewProjectDialog);
+    document.getElementById('np-create').addEventListener('click', async () => {
+      const name = document.getElementById('np-name').value.trim();
+      const location = document.getElementById('np-location').dataset.path || document.getElementById('np-location').value.trim();
+      if (!name) {
+        alert(i18n.isEnglish() ? 'Please enter a project name' : '请输入项目名称');
+        return;
+      }
+      if (!location) {
+        alert(i18n.isEnglish() ? 'Please select a project location' : '请选择项目存放位置');
+        return;
+      }
+      hideNewProjectDialog();
+      await createNewProject(name, location, _npSelectedMode, '2d');
+    });
 
     // ============ 社区登录 ============
     const btnLogin = document.getElementById('home-btn-login');

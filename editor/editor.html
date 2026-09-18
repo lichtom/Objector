@@ -61,7 +61,7 @@
       <div class="menu-item" data-menu="file">
         <span>文件</span>
         <div class="menu-dropdown">
-          <div class="menu-dropdown-item" data-action="home">🏠 返回主页<span class="menu-shortcut">Ctrl+H</span></div>
+          <div class="menu-dropdown-item" data-action="home" data-i18n="menu.home">🏠 关闭窗口<span class="menu-shortcut">Ctrl+H</span></div>
           <div class="menu-sep"></div>
           <div class="menu-dropdown-item" data-action="save">💾 保存项目<span class="menu-shortcut">Ctrl+S</span></div>
           <div class="menu-dropdown-item" data-action="save-local">📥 保存到本地</div>
@@ -80,13 +80,18 @@
         </div>
       </div>
       <div class="menu-item" data-menu="tools">
-        <span>工具</span>
+        <span data-i18n="menu.tools">工具</span>
         <div class="menu-dropdown">
-          <div class="menu-dropdown-item" data-action="load-ext">🧩 扩展导入</div>
-          <div class="menu-dropdown-item" data-action="ext-docs">📖 扩展文档</div>
-          <div class="menu-dropdown-item" data-action="view-code">💻 查看代码</div>
+          <div class="menu-dropdown-item" data-action="load-ext" data-i18n="menu.loadExt">🧩 扩展导入</div>
+          <div class="menu-dropdown-item" data-action="ext-docs" data-i18n="menu.extDocs">📖 扩展文档</div>
+          <div class="menu-dropdown-item" data-action="view-code" data-i18n="menu.viewCode">💻 查看代码</div>
           <div class="menu-sep"></div>
-          <div class="menu-dropdown-item" data-action="blocks-guide">📖 积木指南</div>
+          <div class="menu-dropdown-item" data-action="code-preview" data-i18n="menu.codePreview">🔍 积木转代码预览</div>
+          <div class="menu-dropdown-item" data-action="import-sb3" data-i18n="menu.importSb3">📥 导入 Scratch .sb3</div>
+          <div class="menu-dropdown-item" data-action="show-templates" data-i18n="menu.showTemplates">📦 项目模板库</div>
+          <div class="menu-dropdown-item" data-action="toggle-monitor" data-i18n="menu.toggleMonitor">📊 变量监视面板</div>
+          <div class="menu-sep"></div>
+          <div class="menu-dropdown-item" data-action="blocks-guide" data-i18n="menu.blocksGuide">📖 积木指南</div>
         </div>
       </div>
       <div class="menu-item hidden" data-menu="collab" id="menu-collab">
@@ -121,6 +126,11 @@
         <span id="community-user-info" class="tb-user-info hidden" style="font-size:11px;color:var(--text-secondary);padding:0 8px;"></span>
       </div>
       <div class="toolbar-right">
+        <button id="btn-panel-stage" class="tb-btn" style="font-size:11px;" title="舞台窗口">🎬 舞台</button>
+        <button id="btn-panel-sprites" class="tb-btn" style="font-size:11px;" title="角色窗口">👤 角色</button>
+        <button id="btn-panel-output" class="tb-btn" style="font-size:11px;" title="输出窗口">📝 输出</button>
+        <button id="btn-panel-audio" class="tb-btn" style="font-size:11px;" title="音频窗口">🔊 音频</button>
+        <span class="tb-sep"></span>
         <button id="btn-ai-assistant" class="tb-btn" style="font-size:11px;" title="AI 辅助编程">🤖 AI</button>
         <button id="btn-cmd" class="tb-btn" style="font-size:11px;" title="命令行">⌨️ 命令行</button>
         <span class="tb-sep"></span>
@@ -156,52 +166,20 @@
         </div>
       </main>
 
-      <!-- 右侧舞台/输出 -->
-      <aside id="stage-panel">
-        <div id="stage-tabs">
-          <button class="stage-tab active" data-tab="stage" data-i18n="tabs.stage">舞台</button>
-          <button class="stage-tab" data-tab="output" data-i18n="tabs.output">输出</button>
-          <button class="stage-tab" data-tab="sprites" data-i18n="tabs.sprites">角色</button>
-          <button class="stage-tab hidden" data-tab="files" data-i18n="tabs.files">文件</button>
-          <button class="stage-tab hidden" data-tab="debug" data-i18n="tabs.debug">调试</button>
-        </div>
-        <div id="stage-content">
-          <canvas id="stage-canvas" width="480" height="360"></canvas>
-        </div>
-        <div id="output-content" class="hidden">
-          <div id="output-log"></div>
-        </div>
-        <div id="sprites-content" class="hidden">
-          <div id="sprite-list"></div>
-          <div class="sprite-toolbar">
-            <button id="btn-add-sprite" class="tb-btn" data-i18n="sprites.add">+ 添加角色</button>
-            <button id="btn-upload-costume" class="tb-btn" data-i18n="sprites.upload">⬆ 上传图片</button>
-            <button id="btn-set-costume" class="tb-btn" data-i18n="sprites.setCostume">🖼️ 选择造型</button>
-            <button id="btn-clear-costume" class="tb-btn" data-i18n="sprites.clearCostume">✕ 清除造型</button>
-          </div>
-          <div style="margin-top:8px;padding:0 8px;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;" data-i18n="sprites.costumeLib">🎨 造型库（点击应用，右键删除）</div>
-            <div id="costume-library" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:4px;max-height:120px;overflow:auto;"></div>
-          </div>
-        </div>
-        <div id="debug-content" class="hidden">
-          <div class="debug-toolbar">
-            <button id="btn-debug-continue" class="tb-btn tb-run" data-i18n="debug.continue" data-i18n-title="debug.continueTitle">▶ 继续</button>
-            <button id="btn-debug-step" class="tb-btn" data-i18n="debug.step" data-i18n-title="debug.stepTitle">⏭ 单步</button>
-            <button id="btn-debug-stop" class="tb-btn tb-stop" data-i18n="debug.stop" data-i18n-title="debug.stopTitle">⏹ 停止</button>
-          </div>
-          <div id="debug-panel"></div>
-        </div>
-        <div id="files-content" class="hidden">
-          <div class="file-editor-toolbar">
-            <button id="btn-file-editor-new" class="tb-btn" data-i18n="fileEditor.newFile">+ 新建文件</button>
-            <button id="btn-save-file" class="tb-btn" data-i18n="fileEditor.save">💾 保存</button>
-            <button id="btn-load-test" class="tb-btn tb-run" data-i18n="fileEditor.loadTest">▶ 加载测试</button>
-          </div>
-          <div id="file-list"></div>
-          <textarea id="file-editor-area" data-i18n-ph="fileEditor.placeholder" placeholder="选择或新建文件开始编辑..." spellcheck="false"></textarea>
-        </div>
+      <!-- 右侧：由3个独立OS窗口代替 -->
+      <aside id="stage-panel" style="display:none;">
+        <canvas id="stage-canvas" width="480" height="360" style="display:none;"></canvas>
+        <div id="sprite-list" style="display:none;"></div>
+        <div id="output-log" style="display:none;"></div>
       </aside>
+      <!-- 隐藏面板（调试/文件，供DevMode/FileEditor使用） -->
+      <div id="debug-content" class="hidden" style="display:none;">
+        <div id="debug-panel"></div>
+      </div>
+      <div id="files-content" class="hidden" style="display:none;">
+        <div id="file-list"></div>
+        <textarea id="file-editor-area" data-i18n-ph="fileEditor.placeholder" placeholder="选择或新建文件开始编辑..." spellcheck="false"></textarea>
+      </div>
     </div>
 
     <!-- 高级模式 Godot 式布局（默认隐藏） -->
@@ -451,6 +429,45 @@
     </div>
   </div>
 
+  <!-- 积木转代码预览对话框 -->
+  <div id="code-preview-dialog" class="custom-prompt-overlay hidden">
+    <div class="custom-prompt-box" style="max-width:700px;width:95%;max-height:80vh;">
+      <div class="custom-prompt-title" data-i18n="codePreview.title">💻 积木转代码预览</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button id="code-preview-js" class="tb-btn tb-run" style="flex:1;">JavaScript</button>
+        <button id="code-preview-python" class="tb-btn" style="flex:1;">Python</button>
+        <button id="code-preview-copy" class="tb-btn" style="flex:1;" data-i18n="codePreview.copy">📋 复制代码</button>
+      </div>
+      <pre id="code-preview-output" style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;max-height:400px;overflow:auto;font-size:12px;line-height:1.5;font-family:'Consolas','Monaco',monospace;white-space:pre-wrap;user-select:text;-webkit-user-select:text;"></pre>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;" data-i18n="codePreview.hint">提示：这是积木对应的等价代码，帮助你理解编程逻辑</div>
+      <div class="custom-prompt-actions">
+        <button id="code-preview-close" class="tb-btn" data-i18n="dialog.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 变量监视面板 -->
+  <div id="variables-monitor" class="hidden" style="position:absolute;top:110px;right:8px;width:220px;max-height:300px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:50;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);">
+      <span style="font-size:11px;font-weight:600;color:var(--text-primary);" data-i18n="monitor.title">📊 变量监视</span>
+      <button id="monitor-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;">✕</button>
+    </div>
+    <div id="monitor-content" style="padding:8px;overflow-y:auto;max-height:260px;font-size:11px;">
+      <div style="color:var(--text-muted);text-align:center;padding:12px;" data-i18n="monitor.empty">运行项目后显示变量值</div>
+    </div>
+  </div>
+
+  <!-- 项目模板选择对话框 -->
+  <div id="template-dialog" class="custom-prompt-overlay hidden">
+    <div class="custom-prompt-box" style="max-width:600px;width:95%;">
+      <div class="custom-prompt-title" data-i18n="templates.title">📦 项目模板库</div>
+      <div id="template-list" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0;max-height:400px;overflow-y:auto;"></div>
+      <div class="custom-prompt-actions">
+        <button id="template-close" class="tb-btn" data-i18n="dialog.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 教程系统 -->
   <div id="tutorial-overlay" class="custom-prompt-overlay hidden" style="align-items:flex-start;padding-top:60px;">
     <div class="custom-prompt-box" style="max-width:500px;width:90%;">
@@ -518,6 +535,8 @@
   <script src="core/data-analysis.js"></script>
   <script src="core/block-types/minecraft.js"></script>
   <script src="core/minecraft-mod.js"></script>
+  <script src="core/block-code-converter.js"></script>
+  <script src="core/sb3-importer.js"></script>
   <script src="editor-app.js"></script>
 </body>
 </html>
