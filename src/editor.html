@@ -127,9 +127,6 @@
       </div>
       <div class="toolbar-right">
         <button id="btn-panel-stage" class="tb-btn" style="font-size:11px;" title="舞台窗口">🎬 舞台</button>
-        <button id="btn-panel-sprites" class="tb-btn" style="font-size:11px;" title="角色窗口">👤 角色</button>
-        <button id="btn-panel-output" class="tb-btn" style="font-size:11px;" title="输出窗口">📝 输出</button>
-        <button id="btn-panel-audio" class="tb-btn" style="font-size:11px;" title="音频窗口">🔊 音频</button>
         <span class="tb-sep"></span>
         <button id="btn-ai-assistant" class="tb-btn" style="font-size:11px;" title="AI 辅助编程">🤖 AI</button>
         <button id="btn-cmd" class="tb-btn" style="font-size:11px;" title="命令行">⌨️ 命令行</button>
@@ -149,6 +146,14 @@
 
     <!-- 主体三栏布局 -->
     <div id="main-layout">
+      <!-- 运行时锁定覆盖层 -->
+      <div id="runtime-overlay" class="hidden">
+        <div class="overlay-msg">
+          <span class="icon">▶️</span>
+          运行中，停止后方可编辑<br>
+          <span style="font-size:12px;color:var(--text-muted);">按 Shift+F5 或点击停止按钮</span>
+        </div>
+      </div>
       <!-- 左侧积木面板 -->
       <aside id="palette-panel">
         <div id="palette-categories"></div>
@@ -166,12 +171,32 @@
         </div>
       </main>
 
-      <!-- 右侧：由3个独立OS窗口代替 -->
-      <aside id="stage-panel" style="display:none;">
-        <canvas id="stage-canvas" width="480" height="360" style="display:none;"></canvas>
-        <div id="sprite-list" style="display:none;"></div>
-        <div id="output-log" style="display:none;"></div>
+      <!-- 右侧：角色面板 + 音频面板 -->
+      <aside id="right-panel">
+        <div id="sprite-section">
+          <div class="section-toolbar">
+            <button class="tb-btn" id="btn-add-sprite">+ 添加角色</button>
+            <button class="tb-btn" id="btn-upload-costume">⬆ 造型</button>
+            <button class="tb-btn" id="btn-set-costume">🖼️ 选择</button>
+            <button class="tb-btn" id="btn-clear-costume">✕ 清除</button>
+          </div>
+          <div id="sprite-list"></div>
+          <div class="costume-section">
+            <div class="costume-label">🎨 造型库（点击应用，右键删除）</div>
+            <div id="costume-library"></div>
+          </div>
+        </div>
+        <div id="audio-section">
+          <div class="section-toolbar">
+            <span style="font-size:11px;color:var(--text-secondary);padding:2px 4px;">🔊 音频</span>
+            <button class="tb-btn" id="btn-add-audio">+</button>
+            <button class="tb-btn" id="btn-stop-all-audio">⏹</button>
+          </div>
+          <div id="audio-list"></div>
+        </div>
       </aside>
+      <!-- 隐藏的 canvas（执行用，不显示） -->
+      <canvas id="stage-canvas" width="480" height="360" style="display:none;"></canvas>
       <!-- 隐藏面板（调试/文件，供DevMode/FileEditor使用） -->
       <div id="debug-content" class="hidden" style="display:none;">
         <div id="debug-panel"></div>

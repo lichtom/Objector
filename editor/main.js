@@ -11,11 +11,8 @@ let mainWindow;
 let editorWindow;
 let _pendingEditorInit = null;
 
-// 独立面板窗口
+// 独立面板窗口（舞台+输出合并）
 let _panelStageWin = null;
-let _panelSpritesWin = null;
-let _panelOutputWin = null;
-let _panelAudioWin = null;
 let _panelEditorSender = null;  // 记录编辑器 webContents
 
 // ========== 命令行参数解析（右键菜单 / 文件关联） ==========
@@ -150,11 +147,11 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 
 // ========== 面板窗口管理 ==========
-function _createPanelWin(type, width, height) {
+function _createPanelWin(width, height) {
   const win = new BrowserWindow({
     width, height,
-    minWidth: 200, minHeight: 150,
-    title: 'Objector - ' + ({stage:'舞台',sprites:'角色',output:'输出',audio:'音频'}[type] || type),
+    minWidth: 400, minHeight: 300,
+    title: 'Objector - 舞台',
     icon: APP_ICON,
     backgroundColor: '#1e1e1e',
     frame: false,
@@ -166,41 +163,24 @@ function _createPanelWin(type, width, height) {
     },
     autoHideMenuBar: true,
   });
-  const url = `file://${path.join(__dirname, 'panel.html')}?type=${type}`;
+  const url = `file://${path.join(__dirname, 'panel.html')}`;
   win.loadURL(url);
   win.on('closed', () => {
-    if (type === 'stage') _panelStageWin = null;
-    if (type === 'sprites') _panelSpritesWin = null;
-    if (type === 'output') _panelOutputWin = null;
-    if (type === 'audio') _panelAudioWin = null;
+    _panelStageWin = null;
   });
   return win;
 }
 
 function _closeAllPanels() {
-  [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin].forEach(w => {
-    if (w && !w.isDestroyed()) w.close();
-  });
+  if (_panelStageWin && !_panelStageWin.isDestroyed()) _panelStageWin.close();
   _panelStageWin = null;
-  _panelSpritesWin = null;
-  _panelOutputWin = null;
-  _panelAudioWin = null;
 }
 
-// IPC: 打开4个面板窗口
+// IPC: 打开面板窗口（舞台+输出合并）
 ipcMain.handle('open-panels', async (e) => {
   _panelEditorSender = e.sender;
   if (!_panelStageWin || _panelStageWin.isDestroyed()) {
-    _panelStageWin = _createPanelWin('stage', 520, 420);
-  }
-  if (!_panelSpritesWin || _panelSpritesWin.isDestroyed()) {
-    _panelSpritesWin = _createPanelWin('sprites', 350, 450);
-  }
-  if (!_panelOutputWin || _panelOutputWin.isDestroyed()) {
-    _panelOutputWin = _createPanelWin('output', 450, 300);
-  }
-  if (!_panelAudioWin || _panelAudioWin.isDestroyed()) {
-    _panelAudioWin = _createPanelWin('audio', 350, 350);
+    _panelStageWin = _createPanelWin(520, 520);
   }
   return true;
 });
@@ -211,41 +191,26 @@ ipcMain.handle('close-panels', async () => {
   return true;
 });
 
-// IPC: 显示/聚焦单个面板窗口
+// IPC: 显示/聚焦面板窗口
 ipcMain.handle('show-panel', async (e, type) => {
   _panelEditorSender = e.sender;
-  const sizes = { stage: [520, 420], sprites: [350, 450], output: [450, 300], audio: [350, 350] };
-  let win = null;
-  if (type === 'stage') win = _panelStageWin;
-  else if (type === 'sprites') win = _panelSpritesWin;
-  else if (type === 'output') win = _panelOutputWin;
-  else if (type === 'audio') win = _panelAudioWin;
-
-  if (win && !win.isDestroyed()) {
-    // 窗口已存在，显示并聚焦
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-  } else {
-    // 窗口不存在，创建新窗口
-    const [w, h] = sizes[type] || [400, 350];
-    win = _createPanelWin(type, w, h);
-    if (type === 'stage') _panelStageWin = win;
-    else if (type === 'sprites') _panelSpritesWin = win;
-    else if (type === 'output') _panelOutputWin = win;
-    else if (type === 'audio') _panelAudioWin = win;
+  if (type === 'stage' || type === 'output') {
+    if (_panelStageWin && !_panelStageWin.isDestroyed()) {
+      if (_panelStageWin.isMinimized()) _panelStageWin.restore();
+      _panelStageWin.show();
+      _panelStageWin.focus();
+    } else {
+      _panelStageWin = _createPanelWin(520, 520);
+    }
   }
   return true;
 });
 
-// IPC: 编辑器 -> 面板（转发更新数据）
+// IPC: 编辑器 -> 面板（转发更新数据，只有1个窗口）
 ipcMain.on('panel-update', (_e, data) => {
-  const targets = [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin];
-  targets.forEach(w => {
-    if (w && !w.isDestroyed()) {
-      w.webContents.send('panel-update', data);
-    }
-  });
+  if (_panelStageWin && !_panelStageWin.isDestroyed()) {
+    _panelStageWin.webContents.send('panel-update', data);
+  }
 });
 
 // IPC: 面板 -> 编辑器（转发用户操作）
@@ -257,8 +222,8 @@ ipcMain.on('panel-action', (_e, action, data) => {
 
 // ========== 面板窗口控制 IPC ==========
 function _getPanelWinFromSender(sender) {
-  const allPanels = [_panelStageWin, _panelSpritesWin, _panelOutputWin, _panelAudioWin];
-  return allPanels.find(w => w && !w.isDestroyed() && w.webContents === sender) || null;
+  if (_panelStageWin && !_panelStageWin.isDestroyed() && _panelStageWin.webContents === sender) return _panelStageWin;
+  return null;
 }
 
 ipcMain.on('panel-set-always-on-top', (e, flag) => {

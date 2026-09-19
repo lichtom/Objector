@@ -14,7 +14,7 @@ const Executor = (function () {
   let _timers = [];
   let _broadcastListeners = [];
   let _turboMode = 0;  // turbo 嵌套计数器，>0 表示处于 turbo 模式
-  let _savedBlocks = null;  // 保存编辑器状态的积木（运行时用全部精灵积木替换）
+  let _runtimeBlocks = null; // 运行时使用的合并积木（不影响 EditorState.blocks）
   let _blockSpriteIdx = {};  // blockId → spriteIdx 映射（并发执行时恢复精灵上下文）
   let _postStartCallback = null;  // event_start 完成后调用的回调（用于执行 JS 脚本）
 
@@ -70,34 +70,36 @@ const Executor = (function () {
     // 输出面板始终可见（堆叠布局）
 
     try {
-      // 运行时使用所有精灵的积木（而非仅当前精灵）
-      _savedBlocks = EditorState.blocks;
-      const _savedActiveIdx = typeof StageManager !== 'undefined' ? StageManager.getActiveSpriteIdx() : 0;
-      _blockSpriteIdx = {};  // blockId → spriteIdx 映射
-      if (typeof StageManager !== 'undefined' && StageManager.getAllBlocks) {
-        // 进入执行模式：禁止 setActiveSprite 同步积木
+      // 进入执行模式：setActiveSprite 只更新 _executingIdx，不动 _activeIdx 和 EditorState.blocks
+      _runtimeBlocks = null;
+      _blockSpriteIdx = {};
+
+      if (typeof StageManager !== 'undefined') {
         if (StageManager.setExecuting) StageManager.setExecuting(true);
-        EditorState.blocks = StageManager.getAllBlocks();
-        // 构建 blockId → spriteIdx 映射，用于并发执行时切换当前精灵
+        _runtimeBlocks = {};
         const sprites = StageManager.getSprites();
         for (let si = 0; si < sprites.length; si++) {
+          if (sprites[si].isStage) continue;
           if (sprites[si].blocks) {
-            for (const bid of Object.keys(sprites[si].blocks)) {
+            for (const [bid, blk] of Object.entries(sprites[si].blocks)) {
+              _runtimeBlocks[bid] = blk;
               _blockSpriteIdx[bid] = si;
             }
           }
         }
       }
 
+      const blocks = _runtimeBlocks || EditorState.blocks;
+
       // 先收集类定义
-      for (const b of Object.values(EditorState.blocks)) {
+      for (const b of Object.values(blocks)) {
         if (b.type === 'class_define') {
           await executeClassDefine(b);
         }
       }
 
       // 注册按键事件处理
-      const keyBlocks = Object.values(EditorState.blocks).filter(b => b.type === 'event_key_pressed');
+      const keyBlocks = Object.values(blocks).filter(b => b.type === 'event_key_pressed');
       if (keyBlocks.length > 0) {
         const firedKeys = {};
         _keyHandler = (e) => {
@@ -123,7 +125,7 @@ const Executor = (function () {
       }
 
     // 注册定时器事件
-    const timerBlocks = Object.values(EditorState.blocks).filter(b => b.type === 'event_timer');
+    const timerBlocks = Object.values(blocks).filter(b => b.type === 'event_timer');
     timerBlocks.forEach(tb => {
       const sec = Number(tb.params?.sec || 1);
       const ms = Math.max(sec * 1000, 50);
@@ -137,13 +139,13 @@ const Executor = (function () {
     });
 
     // 注册广播接收者
-    const receiveBlocks = Object.values(EditorState.blocks).filter(b => b.type === 'event_receive');
+    const receiveBlocks = Object.values(blocks).filter(b => b.type === 'event_receive');
     _broadcastListeners = receiveBlocks;
     // 广播触发时需要设置正确的精灵索引
     const broadcastBlockSpriteIdx = _blockSpriteIdx;
 
     // 注册精灵点击事件（通过 SensingInput 回调，支持舞台面板 IPC 输入）
-    const spriteClickBlocks = Object.values(EditorState.blocks).filter(b => b.type === 'event_sprite_clicked');
+    const spriteClickBlocks = Object.values(blocks).filter(b => b.type === 'event_sprite_clicked');
     if (spriteClickBlocks.length > 0 && typeof SensingInput !== 'undefined') {
       SensingInput.onSpriteClick((spriteIndex) => {
         if (_stopRequested || !_running) return;
@@ -158,7 +160,7 @@ const Executor = (function () {
 
     // 找到所有 event_start 积木并并发执行（每个精灵独立运行）
     // 不等待完成：forever 循环的积木不会返回，需与 JS 脚本和事件循环并行
-    const starts = Object.values(EditorState.blocks).filter(b => b.type === 'event_start');
+    const starts = Object.values(blocks).filter(b => b.type === 'event_start');
     const startPromises = starts.map(start => {
       if (_stopRequested) return Promise.resolve();
       const si = _blockSpriteIdx[start.id];
@@ -211,17 +213,16 @@ const Executor = (function () {
 
     _running = false;
     EditorState.running = false;
-    // 退出执行模式，恢复编辑器状态
-    if (typeof StageManager !== 'undefined' && StageManager.setExecuting) {
-      StageManager.setExecuting(false);
-    }
-    if (_savedBlocks) {
-      EditorState.blocks = _savedBlocks;
-      _savedBlocks = null;
-    }
-    // 恢复到运行前的精灵状态
-    if (typeof StageManager !== 'undefined' && StageManager.setActiveSprite) {
-      StageManager.setActiveSprite(typeof _savedActiveIdx !== 'undefined' ? _savedActiveIdx : 0);
+    // 退出执行模式
+    _runtimeBlocks = null;
+    if (typeof StageManager !== 'undefined') {
+      // 关闭执行模式
+      if (StageManager.setExecuting) StageManager.setExecuting(false);
+      // 重新同步积木：确保 EditorState.blocks 与当前精灵一致
+      if (StageManager.setActiveSprite) {
+        const currentIdx = StageManager.getActiveSpriteIdx();
+        StageManager.setActiveSprite(currentIdx);
+      }
     }
     if (typeof DevMode !== 'undefined') DevMode.setExecutingBlock(null);
     document.getElementById('btn-run').disabled = false;
@@ -248,8 +249,14 @@ const Executor = (function () {
     }
     _running = false;
     if (typeof EditorState !== 'undefined') EditorState.running = false;
-    if (typeof StageManager !== 'undefined' && StageManager.setExecuting) StageManager.setExecuting(false);
-    if (_savedBlocks) { EditorState.blocks = _savedBlocks; _savedBlocks = null; }
+    _runtimeBlocks = null;
+    if (typeof StageManager !== 'undefined') {
+      if (StageManager.setExecuting) StageManager.setExecuting(false);
+      if (StageManager.setActiveSprite) {
+        const currentIdx = StageManager.getActiveSpriteIdx();
+        StageManager.setActiveSprite(currentIdx);
+      }
+    }
     document.getElementById('btn-run').disabled = false;
     document.getElementById('btn-stop').disabled = true;
     document.getElementById('status-text').textContent = '已强制停止';
@@ -265,7 +272,7 @@ const Executor = (function () {
       if (si !== undefined && typeof StageManager !== 'undefined') StageManager.setActiveSprite(si);
       const result = await executeBlock(cur, localScope);
       if (result === '__RETURN__' || result === '__STOP__') return result;
-      cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
+      cur = cur.flowOut ? (_runtimeBlocks || EditorState.blocks)[cur.flowOut] : null;
     }
   }
 
@@ -579,7 +586,7 @@ const Executor = (function () {
       const target = findBlockByLabel(targetLabel);
       if (target) {
         // 找到目标积木的下一个积木（跳过标签本身）开始执行
-        const nextBlock = target.flowOut ? EditorState.blocks[target.flowOut] : null;
+        const nextBlock = target.flowOut ? (_runtimeBlocks || EditorState.blocks)[target.flowOut] : null;
         if (nextBlock) {
           const r = await executeChain(nextBlock, scope);
           if (r === '__RETURN__' || r === '__STOP__') return r;
@@ -603,11 +610,11 @@ const Executor = (function () {
       // 运行 [积木本身]：执行传入的积木引用
       const blockVal = p.block;
       if (blockVal && blockVal.__blockRef) {
-        const targetBlock = EditorState.blocks[blockVal.__blockRef];
+        const targetBlock = (_runtimeBlocks || EditorState.blocks)[blockVal.__blockRef];
         if (targetBlock) {
           // 如果是函数定义，执行函数体
           if (targetBlock.type === 'func_define' || blockVal.__isFunction) {
-            const fnBody = targetBlock.flowOut ? EditorState.blocks[targetBlock.flowOut] : null;
+            const fnBody = targetBlock.flowOut ? (_runtimeBlocks || EditorState.blocks)[targetBlock.flowOut] : null;
             if (fnBody) {
               const r = await executeChain(fnBody, scope);
               if (r === '__RETURN__') return r;
@@ -670,7 +677,7 @@ const Executor = (function () {
         const callArgs = await collectCallArgs(block, scope);
         const fnScope = {};
         dynFn.paramNames.forEach((name, i) => { fnScope[name] = callArgs[i] !== undefined ? callArgs[i] : ''; });
-        const targetBlock = EditorState.blocks[dynFn.blockRef];
+        const targetBlock = (_runtimeBlocks || EditorState.blocks)[dynFn.blockRef];
         if (targetBlock) {
           const subTop = dynFn.closure ? getSubTop(targetBlock, 'body') : (targetBlock.type === 'control_code_block' ? getSubTop(targetBlock, 'body') : targetBlock);
           const execScope = dynFn.closure ? { ...dynFn.closure, ...fnScope } : { ...scope, ...fnScope };
@@ -688,7 +695,7 @@ const Executor = (function () {
           const defParamNames = (fn._extraParams || []).map(ep => String(fn.params[ep.name] || '').trim()).filter(Boolean);
           const fnScope = {};
           defParamNames.forEach((name, i) => { fnScope[name] = callArgs[i] !== undefined ? callArgs[i] : ''; });
-          const next = fn.flowOut ? EditorState.blocks[fn.flowOut] : null;
+          const next = fn.flowOut ? (_runtimeBlocks || EditorState.blocks)[fn.flowOut] : null;
           if (next) { const r = await executeChain(next, fnScope); if (r === '__RETURN__') return fnScope.__return; }
         }
       }
@@ -926,7 +933,7 @@ const Executor = (function () {
       // 检查是否有 reporter 连接
       const connId = block.paramConnections && block.paramConnections[p.name];
       if (connId) {
-        const reporter = EditorState.blocks[connId];
+        const reporter = (_runtimeBlocks || EditorState.blocks)[connId];
         if (reporter) {
           // block 类型参数：返回积木引用而不是执行结果
           if (p.type === 'block') {
@@ -1022,7 +1029,7 @@ const Executor = (function () {
           const callArgs = await collectCallArgs(block, scope);
           const fnScope = {};
           dynFn.paramNames.forEach((name, i) => { fnScope[name] = callArgs[i] !== undefined ? callArgs[i] : ''; });
-          const targetBlock = EditorState.blocks[dynFn.blockRef];
+          const targetBlock = (_runtimeBlocks || EditorState.blocks)[dynFn.blockRef];
           if (targetBlock) {
             const subTop = dynFn.closure ? getSubTop(targetBlock, 'body') : (targetBlock.type === 'control_code_block' ? getSubTop(targetBlock, 'body') : targetBlock);
             const execScope = dynFn.closure ? { ...dynFn.closure, ...fnScope } : { ...scope, ...fnScope };
@@ -1038,7 +1045,7 @@ const Executor = (function () {
           const defParamNames = (fn._extraParams || []).map(ep => String(fn.params[ep.name] || '').trim()).filter(Boolean);
           const fnScope = {};
           defParamNames.forEach((name, i) => { fnScope[name] = callArgs[i] !== undefined ? callArgs[i] : ''; });
-          const next = fn.flowOut ? EditorState.blocks[fn.flowOut] : null;
+          const next = fn.flowOut ? (_runtimeBlocks || EditorState.blocks)[fn.flowOut] : null;
           if (next) {
             await executeChain(next, fnScope);
             return fnScope.__return;
@@ -1167,11 +1174,11 @@ const Executor = (function () {
         // 运行 [积木本身] 并返回：执行并返回结果
         const blockVal = p.block;
         if (blockVal && blockVal.__blockRef) {
-          const targetBlock = EditorState.blocks[blockVal.__blockRef];
+          const targetBlock = (_runtimeBlocks || EditorState.blocks)[blockVal.__blockRef];
           if (targetBlock) {
             // 如果是函数定义，执行函数体并获取返回值
             if (targetBlock.type === 'func_define' || blockVal.__isFunction) {
-              const fnBody = targetBlock.flowOut ? EditorState.blocks[targetBlock.flowOut] : null;
+              const fnBody = targetBlock.flowOut ? (_runtimeBlocks || EditorState.blocks)[targetBlock.flowOut] : null;
               if (fnBody) {
                 let result = undefined;
                 const execSync = (b) => {
@@ -1182,7 +1189,7 @@ const Executor = (function () {
                       result = cp.val;
                       return;
                     }
-                    cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
+                    cur = cur.flowOut ? (_runtimeBlocks || EditorState.blocks)[cur.flowOut] : null;
                   }
                 };
                 execSync(fnBody);
@@ -1203,7 +1210,7 @@ const Executor = (function () {
                       result = cp.val;
                       return;
                     }
-                    cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
+                    cur = cur.flowOut ? (_runtimeBlocks || EditorState.blocks)[cur.flowOut] : null;
                   }
                 };
                 execSync(subTop);
@@ -1220,7 +1227,7 @@ const Executor = (function () {
                     result = cp.val;
                     return;
                   }
-                  cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
+                  cur = cur.flowOut ? (_runtimeBlocks || EditorState.blocks)[cur.flowOut] : null;
                 }
               };
               execSync(targetBlock);
@@ -1375,7 +1382,7 @@ const Executor = (function () {
     if (block && paramName) {
       const connId = block.paramConnections && block.paramConnections[paramName];
       if (connId) {
-        const reporter = EditorState.blocks[connId];
+        const reporter = (_runtimeBlocks || EditorState.blocks)[connId];
         if (reporter) {
           const r = await evaluateReporter(reporter, scope);
           return !!r;
@@ -1417,16 +1424,16 @@ const Executor = (function () {
 
   function getSubTop(block, subName) {
     const subId = block.subBlocks && block.subBlocks[subName];
-    return subId ? EditorState.blocks[subId] : null;
+    return subId ? (_runtimeBlocks || EditorState.blocks)[subId] : null;
   }
 
   function findFunction(name) {
-    return Object.values(EditorState.blocks).find(b => b.type === 'func_define' && b.params.name === name);
+    return Object.values(_runtimeBlocks || EditorState.blocks).find(b => b.type === 'func_define' && b.params.name === name);
   }
 
   /** 根据标签名查找积木：支持 control_label_run 的 param 和任意积木的 _importantLabel */
   function findBlockByLabel(label) {
-    return Object.values(EditorState.blocks).find(b => {
+    return Object.values(_runtimeBlocks || EditorState.blocks).find(b => {
       if (b.type === 'control_label_run' && b.params && b.params.label === label) return true;
       if (b._importantLabel === label) return true;
       return false;
@@ -1436,11 +1443,11 @@ const Executor = (function () {
   async function executeClassDefine(block) {
     const name = block.params.name;
     _classes[name] = { name, initBlock: null, methods: {} };
-    let cur = block.flowOut ? EditorState.blocks[block.flowOut] : null;
+    let cur = block.flowOut ? (_runtimeBlocks || EditorState.blocks)[block.flowOut] : null;
     while (cur) {
       if (cur.type === 'class_init') _classes[name].initBlock = cur;
       if (cur.type === 'class_method') _classes[name].methods[cur.params.name] = cur;
-      cur = cur.flowOut ? EditorState.blocks[cur.flowOut] : null;
+      cur = cur.flowOut ? (_runtimeBlocks || EditorState.blocks)[cur.flowOut] : null;
     }
   }
 
@@ -1456,7 +1463,7 @@ const Executor = (function () {
     for (const ep of block._extraParams) {
       const connId = block.paramConnections && block.paramConnections[ep.name];
       if (connId) {
-        const reporter = EditorState.blocks[connId];
+        const reporter = (_runtimeBlocks || EditorState.blocks)[connId];
         if (reporter) {
           result.push(await evaluateReporter(reporter, scope));
           continue;
@@ -1471,7 +1478,7 @@ const Executor = (function () {
 
   /** 公开API：执行积木链（供扩展执行器使用） */
   async function publicRunBlock(blockOrId, scope) {
-    const block = typeof blockOrId === 'string' ? EditorState.blocks[blockOrId] : blockOrId;
+    const block = typeof blockOrId === 'string' ? (_runtimeBlocks || EditorState.blocks)[blockOrId] : blockOrId;
     if (!block) return;
     return await executeChain(block, scope || {});
   }

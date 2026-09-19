@@ -145,7 +145,26 @@ input, textarea, [contenteditable="true"] {
 }
 
 /* Main layout */
-#main-layout { flex:1; display:flex; overflow:hidden; }
+#main-layout { flex:1; display:flex; overflow:hidden; position:relative; }
+
+/* 运行时锁定覆盖层 */
+#runtime-overlay {
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,.35); z-index:500;
+  display:flex; align-items:center; justify-content:center;
+  cursor:not-allowed; pointer-events:auto;
+}
+#runtime-overlay.hidden { display:none; }
+#runtime-overlay .overlay-msg {
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:12px;
+  padding:16px 32px; color:var(--text-primary); font-size:14px; font-weight:600;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
+  text-align:center;
+}
+#runtime-overlay .overlay-msg .icon { font-size:28px; display:block; margin-bottom:8px; }
+#palette-panel.locked, #editor-panel.locked, #right-panel.locked {
+  opacity:0.5; pointer-events:none; user-select:none;
+}
 
 /* Palette */
 #palette-panel { width:var(--palette-w); background:var(--bg-secondary); border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
@@ -164,25 +183,28 @@ input, textarea, [contenteditable="true"] {
 #canvas-zoom-controls button:hover { background:var(--bg-hover); }
 #zoom-level { color:var(--text-secondary); min-width:40px; text-align:center; }
 
-/* Stage panel - 3 independent windows */
-#stage-panel { width:var(--stage-w); background:var(--bg-secondary); border-left:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; overflow:hidden; gap:2px; padding:2px; }
-.rwin { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--bg-primary); }
-.rwin:nth-child(1) { flex:2; min-height:100px; }
-.rwin:nth-child(2) { flex:2; min-height:80px; }
-.rwin:nth-child(3) { flex:1; min-height:60px; max-height:150px; }
-.rwin-titlebar { display:flex; align-items:center; padding:0 8px; height:22px; background:var(--bg-surface); border-bottom:1px solid var(--border); flex-shrink:0; }
-.rwin-title { font-size:11px; font-weight:600; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.rwin-pname { color:var(--accent); }
-#stage-content { flex:1; display:flex; align-items:center; justify-content:center; background:#11111b; position:relative; }
-#stage-canvas { background:#fff; border-radius:2px; max-width:100%; height:auto; }
-#sprites-content { flex:1; display:flex; flex-direction:column; gap:4px; overflow-y:auto; }
-#sprite-list { flex:1; overflow-y:auto; display:flex; flex-wrap:wrap; gap:6px; align-content:flex-start; padding:4px 8px; }
-#output-content { flex:1; display:flex; flex-direction:column; }
-#output-log { flex:1; overflow-y:auto; padding:8px; font-family:'Cascadia Code','Consolas',monospace; font-size:12px; color:var(--text-secondary); white-space:pre-wrap; }
-.sprite-thumb { width:64px; height:64px; background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; font-size:24px; cursor:pointer; }
+/* Right panel: sprites + audio */
+#right-panel { width:var(--stage-w, 240px); background:var(--bg-secondary); border-left:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; overflow:hidden; }
+#sprite-section { flex:2; display:flex; flex-direction:column; overflow:hidden; border-bottom:1px solid var(--border); min-height:120px; }
+.section-toolbar { display:flex; gap:4px; padding:4px 6px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+#sprite-list { flex:1; overflow-y:auto; display:flex; flex-wrap:wrap; gap:6px; align-content:flex-start; padding:6px; }
+.sprite-thumb { width:64px; height:64px; background:var(--bg-surface); border:2px solid var(--border); border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:20px; cursor:pointer; position:relative; }
 .sprite-thumb:hover { border-color:var(--accent); }
 .sprite-thumb.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
-.sprite-toolbar { display:flex; gap:6px; padding:8px; border-top:1px solid var(--border); flex-wrap:wrap; }
+.sprite-thumb.stage { background:var(--bg-hover); border-style:dashed; }
+.sprite-thumb-name { font-size:9px; color:var(--text-muted); margin-top:2px; max-width:58px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; }
+.costume-section { padding:4px 6px; border-top:1px solid var(--border); }
+.costume-label { font-size:10px; color:var(--text-muted); margin-bottom:4px; }
+#costume-library { display:grid; grid-template-columns:repeat(auto-fill,minmax(50px,1fr)); gap:4px; max-height:80px; overflow:auto; }
+#audio-section { flex:1; display:flex; flex-direction:column; overflow:hidden; min-height:60px; }
+#audio-list { flex:1; overflow-y:auto; padding:4px; display:flex; flex-direction:column; gap:4px; }
+.audio-item { display:flex; align-items:center; gap:6px; padding:4px 8px; background:var(--bg-surface); border:1px solid var(--border); border-radius:4px; font-size:11px; }
+.audio-item:hover { border-color:var(--accent); }
+.audio-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); }
+.audio-btn { padding:2px 6px; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-secondary); border-radius:3px; cursor:pointer; font-size:10px; }
+.audio-btn:hover { border-color:var(--accent); color:var(--text-primary); }
+.audio-btn.playing { color:var(--green); border-color:var(--green); }
+.audio-btn.del { color:var(--red); }
 
 /* Advanced (Godot-style) layout */
 #advanced-layout { flex:1; display:flex; overflow:hidden; }
@@ -405,8 +427,8 @@ input, textarea, [contenteditable="true"] {
 .file-item-delete:hover { opacity:1; }
 #file-editor-area { flex:1; background:var(--bg-primary); color:var(--text-primary); border:none; resize:none; padding:12px; font-family:'Cascadia Code','Consolas',monospace; font-size:12px; line-height:1.5; outline:none; tab-size:4; -moz-tab-size:4; }
 
-/* Extension mode wider stage panel */
-#stage-panel.extension-mode { --stage-w:480px; }
+/* Extension mode wider right panel */
+#right-panel.extension-mode { --stage-w:280px; }
 
 /* Param dropdown menu */
 .param-dropdown-menu {

@@ -15,7 +15,10 @@ const AutoSaveManager = (function () {
     // 从 localStorage 读取用户设置
     const savedInterval = localStorage.getItem('autosave-interval');
     if (savedInterval) {
-      _interval = parseInt(savedInterval, 10) * 1000;
+      const parsed = parseInt(savedInterval, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        _interval = parsed * 1000;
+      }
     }
 
     start();
@@ -27,7 +30,7 @@ const AutoSaveManager = (function () {
     stop();
     if (!_isEnabled || _interval <= 0) return;
 
-    _timer = setInterval(() => {
+    _timer = window.setInterval(() => {
       _doAutoSave();
     }, _interval);
   }
@@ -79,7 +82,7 @@ const AutoSaveManager = (function () {
   }
 
   /** 设置保存间隔（秒） */
-  function setInterval(seconds) {
+  function changeInterval(seconds) {
     _interval = seconds * 1000;
     localStorage.setItem('autosave-interval', seconds.toString());
     start(); // 重启定时器
@@ -112,7 +115,7 @@ const AutoSaveManager = (function () {
 
   return {
     init, start, stop,
-    saveNow, setInterval, getInterval,
+    saveNow, changeInterval, getInterval,
     getLastSaveTime, setEnabled, isEnabled
   };
 })();

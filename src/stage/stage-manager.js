@@ -5,19 +5,26 @@ const StageManager = (function () {
   let _sprites = [];
   let _activeIdx = 0;
   let _isExecuting = false;  // 执行期间禁止积木同步
+  let _executingIdx = -1;   // 执行时的目标精灵（不影响 _activeIdx）
   const STAGE_W = 480, STAGE_H = 360;
 
   function init() {
+    console.log('[StageManager] init() called');
+    // 舞台精灵（索引 0，不可删除）
+    const stageSprite = new Sprite('舞台', 0, 0);
+    stageSprite.isStage = true;  // 标记为舞台精灵
+    _sprites.push(stageSprite);
     // 默认精灵
-    _sprites.push(new Sprite('精灵1', 0, 0));
-    _activeIdx = 0;
+    _sprites.push(new Sprite('精灵 1', 0, 0));
+    _activeIdx = 1;  // 默认选中精灵 1
+    console.log('[StageManager] Sprites created:', _sprites.length);
     renderSpriteList();
   }
 
   function getSprites() { return _sprites; }
   function getSprite(idx) { return _sprites[idx] || _sprites[0]; }
-  function getActiveSpriteIdx() { return _activeIdx; }
-  function getActiveSprite() { return _sprites[_activeIdx] || _sprites[0]; }
+  function getActiveSpriteIdx() { return (_isExecuting && _executingIdx >= 0) ? _executingIdx : _activeIdx; }
+  function getActiveSprite() { const idx = (_isExecuting && _executingIdx >= 0) ? _executingIdx : _activeIdx; return _sprites[idx] || _sprites[0]; }
 
   function getSpriteByName(name) {
     return _sprites.find(s => s.name === name) || null;
@@ -45,23 +52,24 @@ const StageManager = (function () {
 
   function setActiveSprite(idx) {
     if (idx >= 0 && idx < _sprites.length) {
-      if (!_isExecuting) {
-        // 编辑器模式：保存/加载积木
-        if (typeof EditorState !== 'undefined' && _sprites[_activeIdx]) {
-          _sprites[_activeIdx].blocks = EditorState.blocks || {};
-        }
+      // 执行期间：只更新 _executingIdx，不动 _activeIdx 和 EditorState.blocks
+      if (_isExecuting) {
+        _executingIdx = idx;
+        return;
+      }
+      // 编辑器模式：保存/加载积木
+      if (typeof EditorState !== 'undefined' && _sprites[_activeIdx]) {
+        _sprites[_activeIdx].blocks = EditorState.blocks || {};
       }
       _activeIdx = idx;
-      if (!_isExecuting) {
-        if (typeof EditorState !== 'undefined') {
-          EditorState.blocks = _sprites[_activeIdx].blocks || {};
-        }
+      if (typeof EditorState !== 'undefined') {
+        EditorState.blocks = _sprites[_activeIdx].blocks || {};
       }
       renderSpriteList();
     }
   }
 
-  function setExecuting(v) { _isExecuting = v; }
+  function setExecuting(v) { _isExecuting = v; if (!v) _executingIdx = -1; }
 
   function addSprite(name) {
     const s = new Sprite(name, 0, 0);
@@ -72,8 +80,9 @@ const StageManager = (function () {
   }
 
   function removeSprite(idx) {
-    if (_sprites.length <= 1) return false;
+    if (_sprites.length <= 2) return false;  // 至少保留舞台 + 1 个精灵
     if (idx < 0 || idx >= _sprites.length) return false;
+    if (_sprites[idx].isStage) return false;  // 舞台精灵不可删除
     // ★ 先保存当前角色的积木数据，再删除
     if (!_isExecuting && typeof EditorState !== 'undefined') {
       _sprites[_activeIdx].blocks = { ...(EditorState.blocks || {}) };
@@ -92,11 +101,12 @@ const StageManager = (function () {
 
   function renderSpriteList() {
     const list = document.getElementById('sprite-list');
+    console.log('[StageManager] renderSpriteList() called, list found:', !!list, 'sprites count:', _sprites.length);
     if (!list) return;
     list.innerHTML = '';
     _sprites.forEach((s, i) => {
       const div = document.createElement('div');
-      div.className = 'sprite-thumb' + (i === _activeIdx ? ' selected' : '');
+      div.className = 'sprite-thumb' + (i === _activeIdx ? ' selected' : '') + (s.isStage ? ' stage' : '');
 
       // 如果有贴图，显示缩略图
       if (s.costumeImage) {
@@ -111,13 +121,16 @@ const StageManager = (function () {
         div.appendChild(nameSpan);
       } else {
         div.style.color = s.color;
-        div.innerHTML = `▲<br><span style="font-size:9px;color:var(--text-muted)">${s.name}</span>`;
+        // 舞台精灵用🎬图标
+        const icon = s.isStage ? '🎬' : '▲';
+        div.innerHTML = `${icon}<br><span style="font-size:9px;color:var(--text-muted)">${s.name}</span>`;
       }
 
       div.addEventListener('click', () => {
         setActiveSprite(i);
       });
       div.addEventListener('dblclick', async () => {
+        if (s.isStage) return;  // 舞台精灵不可重命名
         const newName = await showCustomPrompt('重命名精灵:', s.name);
         if (newName && newName.trim()) {
           s.name = newName.trim();
@@ -410,16 +423,15 @@ const StageManager = (function () {
       vx: s.vx,
       vy: s.vy,
       blocks: s.blocks || {},
+      isStage: s.isStage || false,
     }));
   }
 
-  /** 获取所有精灵的积木合并（运行时用） */
+  /** 获取所有精灵的积木合并（运行时用，只读不修改） */
   function getAllBlocks() {
-    if (typeof EditorState !== 'undefined' && _sprites[_activeIdx]) {
-      _sprites[_activeIdx].blocks = EditorState.blocks || {};
-    }
     const merged = {};
     _sprites.forEach(s => {
+      if (s.isStage) return; // 舞台精灵不参与合并
       if (s.blocks) {
         Object.assign(merged, s.blocks);
       }
@@ -433,7 +445,25 @@ const StageManager = (function () {
   /** 从保存的数据恢复精灵（含贴图加载和积木恢复） */
   function restoreSprites(data, projectPath) {
     _sprites = [];
-    data.forEach(sd => {
+    // 先恢复舞台精灵（索引 0）
+    const stageData = data.find(sd => sd.isStage);
+    const stageSprite = new Sprite('舞台', 0, 0);
+    stageSprite.isStage = true;
+    if (stageData) {
+      // 从保存数据恢复舞台精灵的贴图
+      if (stageData.costumeName && typeof CostumeManager !== 'undefined' && CostumeManager.hasCostume(stageData.costumeName)) {
+        stageSprite.setCostume(stageData.costumeName);
+      } else if (stageData.costumePath) {
+        let fullPath = stageData.costumePath;
+        if (!stageData.costumePath.startsWith('/') && !stageData.costumePath.match(/^[a-zA-Z]:[\\/]/)) {
+          fullPath = projectPath + '/' + stageData.costumePath;
+        }
+        stageSprite.loadCostume(fullPath);
+      }
+    }
+    _sprites.push(stageSprite);
+    // 恢复其他精灵（排除舞台）
+    data.filter(sd => !sd.isStage).forEach(sd => {
       const s = new Sprite(sd.name, sd.x || 0, sd.y || 0);
       s.direction = sd.direction || 90;
       s.size = sd.size || 100;
@@ -456,9 +486,9 @@ const StageManager = (function () {
       }
       _sprites.push(s);
     });
-    _activeIdx = 0;
-    if (typeof EditorState !== 'undefined' && _sprites[0]) {
-      EditorState.blocks = _sprites[0].blocks || {};
+    _activeIdx = 1;  // 默认选中第一个普通精灵
+    if (typeof EditorState !== 'undefined' && _sprites[1]) {
+      EditorState.blocks = _sprites[1].blocks || {};
     }
     renderSpriteList();
   }
@@ -558,9 +588,12 @@ const StageManager = (function () {
       { label: '📏 设置大小', action: 'setsize' },
       { divider: true },
       { label: sprite.visible ? '👁️ 隐藏' : '👁️ 显示', action: 'togglevisible' },
-      { divider: true },
-      { label: '🗑️ 删除角色', action: 'delete', danger: true },
     ];
+    // 舞台精灵不显示删除选项
+    if (!sprite.isStage) {
+      items.push({ divider: true });
+      items.push({ label: '🗑️ 删除角色', action: 'delete', danger: true });
+    }
 
     items.forEach(item => {
       if (item.divider) {

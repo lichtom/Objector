@@ -249,7 +249,7 @@ window.EditorApp = (function () {
     }, 2000);
   }
 
-  /** 更新右侧3个窗口标题中的项目名 */
+  /** 更新右侧 3 个窗口标题中的项目名 */
   function updateRwinTitles() {
     const name = EditorState.projectName || (i18n.isEnglish() ? 'Untitled' : '未命名项目');
     document.querySelectorAll('.rwin-pname').forEach(el => { el.textContent = name; });
@@ -285,6 +285,7 @@ window.EditorApp = (function () {
       visible: s.visible !== false, color: s.color || '#4ec9b0',
       rotationStyle: s.rotationStyle || 'allAround', sayText: s.sayText || '',
       costumeDataUrl: s.costumeImage ? s.costumeImage.src : null,
+      isStage: s.isStage || false,  // 标记舞台精灵
     }));
     window.api.sendPanelUpdate({ type: 'stage', sprites: data });
     window.api.sendPanelUpdate({ type: 'sprites', sprites: data, activeIdx });
@@ -296,17 +297,48 @@ window.EditorApp = (function () {
     window.api.sendPanelUpdate({ type: 'title', name: EditorState.projectName || '' });
   }
 
-  /** 推送音频文件列表到面板 */
+  /** 推送音频列表到编辑器本地渲染 */
   async function _pushAudioList() {
-    if (!_panelsOpened || !window.api || !window.api.sendPanelUpdate) return;
+    const listEl = document.getElementById('audio-list');
+    if (!listEl) return;
     if (!EditorState.projectPath) return;
     try {
       const files = await window.api.listDir(EditorState.projectPath + '/sounds');
       const audioFiles = (files || []).filter(f => /\.(mp3|wav|ogg|m4a|aac)$/i.test(f));
-      window.api.sendPanelUpdate({ type: 'audio-list', files: audioFiles });
+      _renderAudioList(audioFiles);
     } catch(e) {
-      window.api.sendPanelUpdate({ type: 'audio-list', files: [] });
+      _renderAudioList([]);
     }
+  }
+
+  /** 渲染音频列表到编辑器 */
+  function _renderAudioList(audioFiles) {
+    const listEl = document.getElementById('audio-list');
+    if (!listEl) return;
+    if (audioFiles.length === 0) {
+      listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px;">暂无音频</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    audioFiles.forEach((f, i) => {
+      const item = document.createElement('div');
+      item.className = 'audio-item';
+      item.innerHTML = `<span class="audio-name">${f}</span>
+        <button class="audio-btn" data-idx="${i}" data-act="play">▶</button>
+        <button class="audio-btn del" data-idx="${i}" data-act="del">✕</button>`;
+      listEl.appendChild(item);
+    });
+    listEl.querySelectorAll('.audio-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.currentTarget.dataset.idx);
+        const act = e.currentTarget.dataset.act;
+        if (act === 'play' && typeof SoundManager !== 'undefined') {
+          SoundManager.play(audioFiles[idx]);
+        } else if (act === 'del') {
+          _deleteAudioFile(audioFiles[idx]);
+        }
+      });
+    });
   }
 
   /** 添加音频文件 */
@@ -1839,6 +1871,25 @@ window.EditorApp = (function () {
       EditorState._blocksSnapshot = JSON.stringify(EditorState.blocks);
     };
 
+    // 运行时锁定编辑区
+    function _lockEditorForRuntime() {
+      const overlay = document.getElementById('runtime-overlay');
+      if (overlay) overlay.classList.remove('hidden');
+      ['palette-panel', 'editor-panel', 'right-panel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('locked');
+      });
+    }
+
+    function _unlockEditorAfterRuntime() {
+      const overlay = document.getElementById('runtime-overlay');
+      if (overlay) overlay.classList.add('hidden');
+      ['palette-panel', 'editor-panel', 'right-panel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('locked');
+      });
+    }
+
     const _actionRun = async () => {
       // 始终在编辑器本地执行
       Executor.clearOutput();
@@ -1848,12 +1899,16 @@ window.EditorApp = (function () {
       if (_panelsOpened && window.api && window.api.sendPanelUpdate) {
         window.api.sendPanelUpdate({ type: 'output', action: 'set', text: '' });
       }
+      // 锁定编辑区，禁止运行时编辑
+      _lockEditorForRuntime();
       // 启动高频推送精灵数据到舞台面板（~60fps）
       _startStagePushTimer();
       // 本地执行
       await Executor.run();
       // 执行完成后停止推送
       _stopStagePushTimer();
+      // 解除锁定
+      _unlockEditorAfterRuntime();
       // 最后一次推送确保最终状态同步
       _pushPanelSprites();
     };
@@ -1861,6 +1916,8 @@ window.EditorApp = (function () {
       _stopStagePushTimer();
       Executor.stop();
       SoundManager.stopAll();
+      // 解除编辑区锁定
+      _unlockEditorAfterRuntime();
       // 停止后最终推送一次
       _pushPanelSprites();
     };
@@ -1868,6 +1925,8 @@ window.EditorApp = (function () {
       _stopStagePushTimer();
       Executor.forceStop();
       SoundManager.stopAll();
+      // 解除编辑区锁定
+      _unlockEditorAfterRuntime();
       _pushPanelSprites();
     };
     const _actionExportHtml = async () => {
@@ -2145,15 +2204,12 @@ window.EditorApp = (function () {
       }
     });
 
-    // 面板窗口快捷按钮
-    ['stage', 'sprites', 'output', 'audio'].forEach(type => {
+    // 面板窗口快捷按钮（只有舞台按钮了）
+    ['stage'].forEach(type => {
       document.getElementById('btn-panel-' + type)?.addEventListener('click', () => {
         if (window.api && window.api.showPanel) {
           window.api.showPanel(type);
-          // 确保数据推送
-          if (type === 'stage' || type === 'sprites') setTimeout(() => _pushPanelSprites(), 300);
-          if (type === 'audio') setTimeout(() => _pushAudioList(), 300);
-          setTimeout(() => _pushPanelTitle(), 300);
+          setTimeout(() => _pushPanelSprites(), 300);
         }
       });
     });
@@ -2301,6 +2357,12 @@ window.EditorApp = (function () {
     document.getElementById('btn-upload-costume')?.addEventListener('click', uploadCostumeDialog);
     document.getElementById('btn-set-costume')?.addEventListener('click', setCostumeDialog);
     document.getElementById('btn-clear-costume')?.addEventListener('click', clearCostume);
+
+    // 音频面板按钮（编辑器本地）
+    document.getElementById('btn-add-audio')?.addEventListener('click', () => _addAudioFile());
+    document.getElementById('btn-stop-all-audio')?.addEventListener('click', () => {
+      if (typeof SoundManager !== 'undefined') SoundManager.stopAll();
+    });
 
     // 键盘快捷键
     document.addEventListener('keydown', (e) => {
@@ -2815,7 +2877,7 @@ window.EditorApp = (function () {
       document.getElementById('status-text').textContent = i18n.t('status.loadFailed', null).replace('{error}', e.message);
     } finally {
       // 无论加载是否完全成功，都尝试打开面板（仅普通模式）
-      try { _initPanels(); } catch(e) { console.error('[Panel] initPanels error:', e); }
+      try { _initPanels(); _pushAudioList(); } catch(e) { console.error('[Panel] initPanels error:', e); }
     }
   }
 
