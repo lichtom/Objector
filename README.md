@@ -2,13 +2,13 @@
 
 > Visual Block Programming Editor — Build Unlimited Creativity with Blocks
 
-[![Version](https://img.shields.io/badge/version-1.0.25.beta-blue)](https://github.com/tomlct2015/Objector/releases)
+[![Version](https://img.shields.io/badge/version-1.0.25.beta-blue)](https://github.com/lichtom/Objector/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)](https://github.com/tomlct2015/Objector/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)](https://github.com/lichtom/Objector/releases)
 
 **Objector** is a [Electron](https://www.electronjs.org/)-based visual block programming editor that enables even beginners to create animations, games, and interactive programs. Not just a Scratch clone — it's a comprehensive evolution designed for professional developers.
 
-[🌐 Try Online](https://tomlct2015.github.io/Objector-Coder/editor/) · [📖 Blocks Guide](https://tomlct2015.github.io/Objector-Coder/blocks-guide/) · [📥 Download Latest](https://github.com/tomlct2015/Objector/releases/latest)
+[🌐 Try Online](https://lichtom.github.io/Objector-Coder/editor/) · [📖 Blocks Guide](https://lichtom.github.io/Objector-Coder/blocks-guide/) · [📥 Download Latest](https://github.com/lichtom/Objector/releases/latest)
 
 ---
 
@@ -45,13 +45,13 @@
 ## 📥 Download
 
 ### Windows (x64)
-- **[Installer (.exe)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-Setup-1.0.25.beta.exe)** — NSIS installer with custom install path
-- **[Portable (.zip)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/Objector-1.0.25.beta-win.zip)** — Extract and run
+- **[Installer (.exe)](https://github.com/lichtom/Objector/releases/download/v1.0.25.beta/Objector-Setup-1.0.25.beta.exe)** — NSIS installer with custom install path
+- **[Portable (.zip)](https://github.com/lichtom/Objector/releases/download/v1.0.25.beta/Objector-1.0.25.beta-win.zip)** — Extract and run
 
 ### Linux (x64)
-- **[Archive (.tar.gz)](https://github.com/tomlct2015/Objector/releases/download/v1.0.25.beta/objector-1.0.25.beta.tar.gz)** — Requires libgtk-3 and libnss3
+- **[Archive (.tar.gz)](https://github.com/lichtom/Objector/releases/download/v1.0.25.beta/objector-1.0.25.beta.tar.gz)** — Requires libgtk-3 and libnss3
 
-See [all releases](https://github.com/tomlct2015/Objector/releases) for previous versions.
+See [all releases](https://github.com/lichtom/Objector/releases) for previous versions.
 
 ## 🚀 Quick Start
 
@@ -59,7 +59,7 @@ See [all releases](https://github.com/tomlct2015/Objector/releases) for previous
 
 ```bash
 # Clone the repository
-git clone https://github.com/tomlct2015/Objector.git
+git clone https://github.com/lichtom/Objector.git
 cd Objector
 
 # Install dependencies
@@ -178,8 +178,8 @@ The AI assistant supports a `>>>` command system for editor operations:
 
 ## 🔗 Links
 
-- [Website](https://tomlct2015.github.io/Objector-Coder/)
-- [Online Editor](https://tomlct2015.github.io/Objector-Coder/editor/)
-- [Blocks Guide](https://tomlct2015.github.io/Objector-Coder/blocks-guide/)
-- [Extension API Docs](https://tomlct2015.github.io/Objector-Coder/extension-api/)
-- [Version History](https://tomlct2015.github.io/Objector-Coder/versions.html)
+- [Website](https://lichtom.github.io/Objector-Coder/)
+- [Online Editor](https://lichtom.github.io/Objector-Coder/editor/)
+- [Blocks Guide](https://lichtom.github.io/Objector-Coder/blocks-guide/)
+- [Extension API Docs](https://lichtom.github.io/Objector-Coder/extension-api/)
+- [Version History](https://lichtom.github.io/Objector-Coder/versions.html)

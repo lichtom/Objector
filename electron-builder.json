@@ -5,6 +5,45 @@
     "output": "dist/nsis-build"
   },
   "asar": true,
+  "asarUnpack": [
+    "Objector2.ico",
+    "Objector.ico",
+    "native/app-runtime/build/Release/app_runtime.node"
+  ],
+  "files": [
+    "src/**/*",
+    "editor/**/*",
+    "icons/**/*",
+    "docs/**/*",
+    "sounds/**/*",
+    "examples/**/*",
+    "extensions/**/*",
+    "native/app-runtime/build/Release/app_runtime.node",
+    "package.json",
+    "Objector.ico",
+    "Objector.png",
+    "Objector.svg",
+    "Objector2.ico",
+    "Objector2.png",
+    "Objector2.svg",
+    "Objector2.icns",
+    "Objector2_1024.png",
+    "ObjectorLoadImage.svg",
+    "我的世界.png",
+    "installer.nsh",
+    "!out/**/*",
+    "!dist/**/*",
+    "!build/**/*",
+    "!proj/**/*",
+    "!tests/**/*",
+    "!宣传片/**/*",
+    "!服务器/**/*",
+    "!objector-mc-addon/**/*",
+    "!objector-netease-mod/**/*",
+    "!sb3-file-source/**/*",
+    "!.npm-temp/**/*",
+    "!buildtemp/**/*"
+  ],
   "win": {
     "target": [
       {

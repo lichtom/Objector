@@ -1,7 +1,7 @@
 {
   "name": "objector",
   "productName": "Objector",
-  "version": "1.0.27",
+  "version": "1.0.31",
   "description": "图形化积木编程编辑器",
   "author": "Objector",
   "main": "src/main.js",
@@ -11,7 +11,13 @@
     "make": "electron-forge make"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.1"
+    "archiver": "^8.0.0",
+    "electron-packager": "^17.1.2",
+    "electron-squirrel-startup": "^1.0.1",
+    "png-to-ico": "^3.0.2",
+    "png2icons": "^2.0.1",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.4.0",
@@ -19,15 +25,12 @@
     "@electron-forge/maker-rpm": "^7.4.0",
     "@electron-forge/maker-squirrel": "^7.4.0",
     "@electron-forge/maker-zip": "^7.4.0",
-    "archiver": "^8.0.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "electron-installer-windows": "^3.0.0",
     "electron-winstaller": "^5.1.0",
-    "nsis": "^0.0.0",
-    "png-to-ico": "^3.0.2",
-    "png2icons": "^2.0.1",
-    "pngjs": "^7.0.0",
-    "sharp": "^0.35.3"
+    "node-addon-api": "^8.9.2",
+    "node-gyp": "^12.4.0",
+    "nsis": "^0.0.0"
   }
 }
