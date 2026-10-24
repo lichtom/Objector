@@ -8,7 +8,7 @@
 
 **Objector** is a [Electron](https://www.electronjs.org/)-based visual block programming editor that enables even beginners to create animations, games, and interactive programs. Not just a Scratch clone — it's a comprehensive evolution designed for professional developers.
 
-[🌐 Try Online](https://lichtom.github.io/Objector-Coder/editor/) · [📖 Blocks Guide](https://lichtom.github.io/Objector-Coder/blocks-guide/) · [📥 Download Latest](https://github.com/lichtom/Objector/releases/latest)
+[🌐 Try Online](https://lichtom.github.io/objector-coder/editor/) · [📖 Blocks Guide](https://lichtom.github.io/objector-coder/blocks-guide/) · [📥 Download Latest](https://github.com/lichtom/Objector/releases/latest)
 
 ---
 
@@ -178,8 +178,8 @@ The AI assistant supports a `>>>` command system for editor operations:
 
 ## 🔗 Links
 
-- [Website](https://lichtom.github.io/Objector-Coder/)
-- [Online Editor](https://lichtom.github.io/Objector-Coder/editor/)
-- [Blocks Guide](https://lichtom.github.io/Objector-Coder/blocks-guide/)
-- [Extension API Docs](https://lichtom.github.io/Objector-Coder/extension-api/)
-- [Version History](https://lichtom.github.io/Objector-Coder/versions.html)
+- [Website](https://lichtom.github.io/objector-coder/)
+- [Online Editor](https://lichtom.github.io/objector-coder/editor/)
+- [Blocks Guide](https://lichtom.github.io/objector-coder/blocks-guide/)
+- [Extension API Docs](https://lichtom.github.io/objector-coder/extension-api/)
+- [Version History](https://lichtom.github.io/objector-coder/versions.html)

@@ -18,6 +18,7 @@
     "sounds/**/*",
     "examples/**/*",
     "extensions/**/*",
+    "microbit-firmware/**/*",
     "native/app-runtime/build/Release/app_runtime.node",
     "package.json",
     "Objector.ico",
@@ -55,7 +56,8 @@
         "arch": ["x64"]
       }
     ],
-    "icon": "Objector2.ico"
+    "icon": "Objector2.ico",
+    "forceCodeSigning": false
   },
   "nsis": {
     "oneClick": false,
