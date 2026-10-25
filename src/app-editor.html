@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Objector - APP开发编辑器</title>
+  <link rel="stylesheet" href="styles.css?v=20250930" />
+  <link rel="stylesheet" href="app-editor.css" />
+  <script src="core/i18n.js"></script>
+  <script src="i18n/zh-CN.js"></script>
+  <script src="i18n/en.js"></script>
+  <script>if(!window.api){document.write('<script src="web-api-shim.js"><\/script>')}</script>
+</head>
+<body>
+  <!-- 编辑器界面 -->
+  <div id="app-editor-screen">
+    <!-- 顶部标题栏 -->
+    <header id="titlebar">
+      <div class="titlebar-drag">
+        <img src="../Objector2.png" class="app-logo" alt="" />
+        <span class="app-title">Objector</span>
+        <span class="app-sep">|</span>
+        <span id="project-name" class="project-name-editable">APP项目</span>
+      </div>
+      <div class="titlebar-controls">
+        <button id="win-minimize" class="win-btn" data-i18n-title="titlebar.minimize">
+          <img src="../icons/窗口操作图标/最小化.svg" class="tb-icon">
+        </button>
+        <button id="win-maximize" class="win-btn" data-i18n-title="titlebar.maximize">
+          <img src="../icons/窗口操作图标/最大化.svg" class="tb-icon">
+        </button>
+        <button id="win-close" class="win-btn win-close-btn" data-i18n-title="titlebar.close">
+          <img src="../icons/窗口操作图标/关闭.svg" class="tb-icon">
+        </button>
+      </div>
+    </header>
+
+    <!-- 菜单栏 -->
+    <div id="menubar">
+      <div class="menu-item" data-menu="file">
+        <span>文件</span>
+        <div class="menu-dropdown">
+          <div class="menu-dropdown-item" data-action="home">
+            <img src="../icons/窗口操作图标/关闭.svg" class="tb-icon"> 关闭窗口
+            <span class="menu-shortcut">Ctrl+H</span>
+          </div>
+          <div class="menu-sep"></div>
+          <div class="menu-dropdown-item" data-action="save">
+            <img src="../icons/Document.svg" class="tb-icon"> 保存项目
+            <span class="menu-shortcut">Ctrl+S</span>
+          </div>
+          <div class="menu-dropdown-item" data-action="export">
+            <img src="../icons/Language.svg" class="tb-icon"> 导出...
+          </div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="run">
+        <span>运行</span>
+        <div class="menu-dropdown">
+          <div class="menu-dropdown-item" data-action="run-test">
+            <img src="../icons/Run.svg" class="tb-icon"> 测试运行
+            <span class="menu-shortcut">F5</span>
+          </div>
+          <div class="menu-dropdown-item" data-action="stop-test">
+            <img src="../icons/Stop.svg" class="tb-icon"> 停止
+            <span class="menu-shortcut">Shift+F5</span>
+          </div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="help">
+        <span>帮助</span>
+        <div class="menu-dropdown">
+          <div class="menu-dropdown-item" data-action="app-guide">
+            <img src="../icons/Document.svg" class="tb-icon"> APP开发指南
+          </div>
+          <div class="menu-dropdown-item" data-action="prop-reference">
+            <img src="../icons/Document.svg" class="tb-icon"> 组件属性获取
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div id="toolbar">
+      <div class="toolbar-left">
+        <button id="btn-run-test" class="tb-btn tb-run" data-i18n-title="appEditor.runTest">
+          <img src="../icons/Run.svg" class="tb-icon"> 测试运行
+        </button>
+        <button id="btn-stop-test" class="tb-btn tb-stop" data-i18n-title="appEditor.stopTest" disabled>
+          <img src="../icons/Stop.svg" class="tb-icon"> 停止
+        </button>
+      </div>
+      <div class="toolbar-right">
+      </div>
+    </div>
+
+    <!-- 主编辑区 3列布局 -->
+    <div id="app-main-grid">
+      <!-- 左列上：窗口系统 -->
+      <div id="app-windows-panel" class="app-panel">
+        <div class="panel-header">
+          <span class="panel-title" data-i18n="appEditor.windows">窗口</span>
+          <div class="panel-actions">
+            <button id="btn-add-window" class="panel-btn" data-i18n-title="appEditor.addWindow">+</button>
+            <button id="btn-remove-window" class="panel-btn" data-i18n-title="appEditor.removeWindow">-</button>
+          </div>
+        </div>
+        <div id="windows-tree" class="panel-content">
+          <!-- 窗口列表将动态渲染 -->
+        </div>
+      </div>
+
+      <!-- 中间：可视化编辑器 -->
+      <div id="app-visual-panel" class="app-panel">
+        <div class="panel-header">
+          <span class="panel-title">🎨 可视化编辑器</span>
+          <div class="panel-actions">
+            <button id="btn-toggle-grid" class="panel-btn" title="网格">⊞</button>
+            <button id="btn-toggle-snap" class="panel-btn snap-active" title="吸附">⊡</button>
+            <button id="btn-zoom-in" class="panel-btn" title="放大">+</button>
+            <button id="btn-zoom-out" class="panel-btn" title="缩小">−</button>
+            <button id="btn-zoom-fit" class="panel-btn" title="适应">⊡</button>
+          </div>
+        </div>
+        <div id="visual-canvas-container">
+          <div id="visual-canvas">
+            <div id="visual-window-frame" class="visual-window-frame">
+              <!-- 可视化预览区域 -->
+            </div>
+          </div>
+          <!-- 组件工具栏 -->
+          <div id="visual-toolbar">
+            <div class="toolbar-tool" data-type="button" title="按钮">🔘</div>
+            <div class="toolbar-tool" data-type="input" title="输入框">📝</div>
+            <div class="toolbar-tool" data-type="textarea" title="文本域">📄</div>
+            <div class="toolbar-tool" data-type="label" title="标签">🏷️</div>
+            <div class="toolbar-tool" data-type="checkbox" title="复选框">☑️</div>
+            <div class="toolbar-tool" data-type="radio" title="单选">⚪</div>
+            <div class="toolbar-tool" data-type="dropdown" title="下拉框">📃</div>
+            <div class="toolbar-tool" data-type="slider" title="滑块">🎚️</div>
+            <div class="toolbar-tool" data-type="progress" title="进度条">📊</div>
+            <div class="toolbar-tool" data-type="list" title="列表">📋</div>
+            <div class="toolbar-tool" data-type="image" title="图片">🖼️</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右列上：设置面板 -->
+      <div id="app-settings-panel" class="app-panel">
+        <div class="panel-header">
+          <span class="panel-title" data-i18n="appEditor.settings">设置</span>
+        </div>
+        <div id="settings-content" class="panel-content">
+          <div class="settings-placeholder">
+            选择窗口或组件以编辑属性
+          </div>
+        </div>
+      </div>
+
+      <!-- 左列下：控制台 -->
+      <div id="app-console-panel" class="app-panel">
+        <div class="panel-header">
+          <span class="panel-title" data-i18n="appEditor.console">控制台</span>
+          <div class="panel-actions">
+            <button id="btn-clear-console" class="panel-btn">清空</button>
+          </div>
+        </div>
+        <div id="console-output" class="panel-content console-content">
+          <!-- 控制台输出将动态追加 -->
+        </div>
+      </div>
+
+      <!-- 右下：软件整体设置 -->
+      <div id="app-global-settings" class="app-panel">
+        <div class="panel-header">
+          <span class="panel-title" data-i18n="appEditor.globalSettings">软件设置</span>
+        </div>
+        <div id="global-settings-content" class="panel-content">
+          <div class="inspector-group">
+            <label class="inspector-label" data-i18n="appEditor.appTitle">应用标题</label>
+            <input id="app-title-input" type="text" class="settings-input" />
+          </div>
+          <div class="inspector-group">
+            <label class="inspector-label" data-i18n="appEditor.startWindow">启动窗口</label>
+            <select id="app-start-window" class="settings-input"></select>
+          </div>
+          <div class="inspector-group">
+            <label class="inspector-label">应用图标</label>
+            <input id="app-icon-input" type="file" accept="image/*" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出进度对话框 -->
+  <div id="export-progress-dialog" class="custom-prompt-overlay hidden">
+    <div class="custom-prompt-box" style="min-width:380px;max-width:440px;">
+      <h3 style="margin:0 0 16px;font-size:15px;color:var(--accent,#89b4fa);">准备导出环境</h3>
+      <div id="export-progress-status" style="font-size:13px;color:var(--text-primary);margin-bottom:10px;">检测依赖...</div>
+      <div style="width:100%;height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;margin-bottom:8px;">
+        <div id="export-progress-bar" style="width:0%;height:100%;background:var(--accent);border-radius:4px;transition:width 0.3s;"></div>
+      </div>
+      <div id="export-progress-detail" style="font-size:11px;color:var(--text-secondary);text-align:right;"></div>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div id="app-context-menu" style="display:none;position:fixed;z-index:9999;background:#2d2d2d;border:1px solid #444;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.3);padding:4px 0;min-width:160px;">
+  </div>
+
+  <!-- 加载脚本 -->
+  <script src="core/app-window-manager.js"></script>
+  <script src="core/app-blocks.js"></script>
+  <script src="app-editor-app.js"></script>
+</body>
+</html>

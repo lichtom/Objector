@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>测试运行</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      overflow: hidden;
+      background: #f0f0f0;
+    }
+    #app-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: auto;
+    }
+    .app-component {
+      position: absolute;
+    }
+    #loading-overlay {
+      position: fixed; inset: 0;
+      background: rgba(240,240,240,0.95);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: #666;
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading-overlay">加载中...</div>
+  <div id="app-container"></div>
+
+  <script>
+    var _windowConfig = null;
+    var _components = {};
+    var _vars = {};
+    var _timers = [];
+    var _storage = {};
+    var _selectedListItems = {};
+    var _currentComponent = null;
+
+    // ========== 原生模式 ==========
+    var _nativeMode = false;
+    var _ctrlMap = {};  // name -> ctrlId
+    var _ctrlConfigMap = {};  // name -> comp config
+    var _nativeStrokeColor = '#000000';
+    var _nativeStrokeSize = 2;
+    var _nativeFillColor = '';
+
+    function _nativeSend(cmd) {
+      // canvas/html 组件未映射 ctrlId，安全跳过防止 C++ addon 崩溃
+      if (cmd.ctrlId == null && cmd.action !== 'setTitle') return;
+      if (window.api && window.api.nativeCmd) window.api.nativeCmd(cmd);
+    }
+    async function _nativeSendAsync(cmd) {
+      if (cmd.ctrlId == null && cmd.action !== 'setTitle') return null;
+      if (window.api && window.api.nativeCmd) return await window.api.nativeCmd(cmd);
+      return null;
+    }
+
+    // ========== 控件抽象层（统一 DOM 和原生模式）==========
+
+    function _ctrlSetText(name, text) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'setText', ctrlId: _ctrlMap[name], value: text });
+      } else {
+        var c = _components[name]; if (!c || !c.dom) return;
+        var el = c.dom;
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = String(text);
+        else if (el._inputEl) { el._inputEl.nextSibling.textContent = String(text); }
+        else el.textContent = String(text);
+      }
+    }
+
+    function _ctrlSetEnabled(name, enabled) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'setEnabled', ctrlId: _ctrlMap[name], value: enabled });
+      } else {
+        var c = _components[name]; if (!c || !c.dom) return;
+        if (c.dom._inputEl) c.dom._inputEl.disabled = !enabled;
+        else c.dom.disabled = !enabled;
+      }
+    }
+
+    function _ctrlSetValue(name, value) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'setProp', ctrlId: _ctrlMap[name], prop: 'value', value: String(value) });
+      } else {
+        var c = _components[name]; if (!c || !c.dom) return;
+        var el = c.dom;
+        if (el._inputEl) { el._inputEl.checked = !!(value); }
+        else el.value = String(value);
+      }
+    }
+
+    async function _ctrlGetValue(name) {
+      if (_nativeMode) {
+        return (await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'value' })) || '';
+      }
+      var c = _components[name]; if (!c || !c.dom) return '';
+      var el = c.dom;
+      if (el._inputEl) return el._inputEl.checked;
+      return el.value || '';
+    }
+
+    async function _ctrlGetText(name) {
+      if (_nativeMode) {
+        return (await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'text' })) || '';
+      }
+      var c = _components[name]; if (!c || !c.dom) return '';
+      var el = c.dom;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el.value || '';
+      if (el._inputEl) return el._inputEl.nextSibling ? el._inputEl.nextSibling.textContent : '';
+      return el.textContent || '';
+    }
+
+    function _ctrlListAdd(name, item) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'listAdd', ctrlId: _ctrlMap[name], item: item });
+      } else {
+        var c = _components[name];
+        if (c && c.dom) {
+          var opt = document.createElement('option');
+          opt.value = String(item); opt.textContent = String(item);
+          c.dom.appendChild(opt);
+        }
+      }
+    }
+
+    function _ctrlListClear(name) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'listClear', ctrlId: _ctrlMap[name] });
+      } else {
+        var c = _components[name]; if (c && c.dom) c.dom.innerHTML = '';
+      }
+    }
+
+    async function _ctrlListSelected(name) {
+      if (_nativeMode) {
+        return (await _nativeSendAsync({ action: 'listSelected', ctrlId: _ctrlMap[name] })) || '';
+      }
+      return _selectedListItems[name] || '';
+    }
+
+    function _ctrlShow(name) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'show', ctrlId: _ctrlMap[name] });
+      } else {
+        var c = _components[name]; if (c && c.wrapper) c.wrapper.style.display = '';
+      }
+    }
+
+    function _ctrlHide(name) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'hide', ctrlId: _ctrlMap[name] });
+      } else {
+        var c = _components[name]; if (c && c.wrapper) c.wrapper.style.display = 'none';
+      }
+    }
+
+    function _ctrlSetPos(name, x, y) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'setPos', ctrlId: _ctrlMap[name], x: x, y: y });
+      } else {
+        var c = _components[name];
+        if (c && c.wrapper) { c.wrapper.style.left = Number(x) + 'px'; c.wrapper.style.top = Number(y) + 'px'; }
+      }
+    }
+
+    function _ctrlSetSize(name, w, h) {
+      if (_nativeMode) {
+        _nativeSend({ action: 'setSize', ctrlId: _ctrlMap[name], w: w, h: h });
+      } else {
+        var c = _components[name];
+        if (c && c.dom) { c.dom.style.width = Number(w) + 'px'; c.dom.style.height = Number(h) + 'px'; }
+      }
+    }
+
+    async function _ctrlGetX(name) {
+      if (_nativeMode) {
+        return Number(await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'x' })) || 0;
+      }
+      var c = _components[name]; return c ? (parseInt(c.wrapper.style.left) || 0) : 0;
+    }
+
+    async function _ctrlGetY(name) {
+      if (_nativeMode) {
+        return Number(await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'y' })) || 0;
+      }
+      var c = _components[name]; return c ? (parseInt(c.wrapper.style.top) || 0) : 0;
+    }
+
+    async function _ctrlGetWidth(name) {
+      if (_nativeMode) {
+        return Number(await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'width' })) || 0;
+      }
+      var c = _components[name]; return c ? (c.dom ? (c.dom.offsetWidth || 0) : 0) : 0;
+    }
+
+    async function _ctrlGetHeight(name) {
+      if (_nativeMode) {
+        return Number(await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'height' })) || 0;
+      }
+      var c = _components[name]; return c ? (c.dom ? (c.dom.offsetHeight || 0) : 0) : 0;
+    }
+
+    async function _ctrlGetVisible(name) {
+      if (_nativeMode) {
+        return (await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'visible' })) === true;
+      }
+      var c = _components[name]; return c ? (c.wrapper.style.display !== 'none') : false;
+    }
+
+    // ========== 统一属性设置/获取 ==========
+    async function _applyProp(name, prop, op, value) {
+      prop = String(prop).toLowerCase().trim();
+      op = op || '=';
+      var c = _components[name];
+      // 原生模式：通过 _ctrlMap 查找组件，不依赖 DOM
+      if (!c && _nativeMode && !_ctrlMap.hasOwnProperty(name)) {
+        logToEditor('组件不存在: ' + name, 'warn'); return;
+      }
+      if (!c && !_nativeMode) {
+        logToEditor('组件不存在: ' + name, 'warn'); return;
+      }
+      // 获取当前值（用于运算）
+      var cur = await _getProp(name, prop);
+      var newVal = value;
+      // 运算
+      if (op === '+=') newVal = (Number(cur) || 0) + Number(value);
+      else if (op === '-=') newVal = (Number(cur) || 0) - Number(value);
+      else if (op === '*=') newVal = (Number(cur) || 0) * Number(value);
+      else if (op === '/=') newVal = (Number(cur) || 0) / (Number(value) || 1);
+      // 按属性名分发
+      switch (prop) {
+        case 'text': _ctrlSetText(name, newVal); break;
+        case 'value': case 'defaultvalue': _ctrlSetValue(name, newVal); break;
+        case 'x': {
+          var curY = _nativeMode ? await _ctrlGetY(name) : (c && c.wrapper ? parseInt(c.wrapper.style.top) || 0 : 0);
+          _ctrlSetPos(name, newVal, curY); break;
+        }
+        case 'y': {
+          var curX = _nativeMode ? await _ctrlGetX(name) : (c && c.wrapper ? parseInt(c.wrapper.style.left) || 0 : 0);
+          _ctrlSetPos(name, curX, newVal); break;
+        }
+        case 'width': {
+          var curH = _nativeMode ? await _ctrlGetHeight(name) : (c && c.dom ? c.dom.offsetHeight || 32 : 32);
+          _ctrlSetSize(name, newVal, curH); break;
+        }
+        case 'height': {
+          var curW = _nativeMode ? await _ctrlGetWidth(name) : (c && c.dom ? c.dom.offsetWidth || 120 : 120);
+          _ctrlSetSize(name, curW, newVal); break;
+        }
+        case 'visible': (newVal === false || newVal === 'false' || newVal === 0) ? _ctrlHide(name) : _ctrlShow(name); break;
+        case 'enabled': _ctrlSetEnabled(name, newVal !== false && newVal !== 'false' && newVal !== 0); break;
+        case 'src': if (c && c.dom && c.dom.tagName === 'IMG') c.dom.src = String(newVal);
+          else if (_nativeMode) { /* 原生模式不支持 src */ }
+          break;
+        case 'bgcolor': case 'backgroundcolor':
+          if (c && c.dom) c.dom.style.backgroundColor = String(newVal);
+          else if (_nativeMode) { /* 原生模式不支持背景色 */ }
+          break;
+        case 'textcolor': case 'color':
+          if (c && c.dom) c.dom.style.color = String(newVal);
+          else if (_nativeMode) { /* 原生模式不支持文字颜色 */ }
+          break;
+        case 'fontsize':
+          if (c && c.dom) c.dom.style.fontSize = Number(newVal) + 'px';
+          else if (_nativeMode) { /* 原生模式不支持字号 */ }
+          break;
+        case 'border':
+          if (c && c.dom) {
+            var v = String(newVal);
+            c.dom.style.borderRadius = (v === 'rounded' ? '8px' : v === 'circle' ? '50%' : v === 'none' ? '0' : '');
+          } break;
+        case 'items': if (Array.isArray(newVal)) {
+          _ctrlListClear(name);
+          newVal.forEach(function(item) { _ctrlListAdd(name, item); });
+        } break;
+        case 'min': case 'max':
+          if (c && c.dom && c.dom[prop] !== undefined) c.dom[prop] = Number(newVal);
+          break;
+        default: logToEditor('未知属性: ' + prop, 'warn');
+      }
+    }
+
+    async function _getProp(name, prop) {
+      prop = String(prop).toLowerCase().trim();
+      var c = _components[name];
+      // 原生模式：通过 _ctrlMap 查找
+      if (_nativeMode) {
+        switch (prop) {
+          case 'text': return await _ctrlGetText(name);
+          case 'value': case 'defaultvalue': return await _ctrlGetValue(name);
+          case 'x': return await _ctrlGetX(name);
+          case 'y': return await _ctrlGetY(name);
+          case 'width': return await _ctrlGetWidth(name);
+          case 'height': return await _ctrlGetHeight(name);
+          case 'visible': return await _ctrlGetVisible(name);
+          case 'enabled': return (await _nativeSendAsync({ action: 'getProp', ctrlId: _ctrlMap[name], prop: 'enabled' })) === true;
+          case 'name': return (_ctrlConfigMap[name] && _ctrlConfigMap[name].name) || name;
+          case 'type': return (_ctrlConfigMap[name] && _ctrlConfigMap[name].type) || '';
+          default: return '';
+        }
+      }
+      if (!c) return '';
+      switch (prop) {
+        case 'text': return _ctrlGetText(name);
+        case 'value': case 'defaultvalue': return _ctrlGetValue(name);
+        case 'x': return parseInt(c.wrapper?.style.left) || 0;
+        case 'y': return parseInt(c.wrapper?.style.top) || 0;
+        case 'width': return c.dom?.offsetWidth || 0;
+        case 'height': return c.dom?.offsetHeight || 0;
+        case 'visible': return c.wrapper?.style.display !== 'none';
+        case 'enabled': return !c.dom?.disabled;
+        case 'src': return c.dom?.src || '';
+        case 'bgcolor': case 'backgroundcolor': return c.dom?.style.backgroundColor || '';
+        case 'textcolor': case 'color': return c.dom?.style.color || '';
+        case 'fontsize': return parseInt(c.dom?.style.fontSize) || 14;
+        case 'name': return c.config?.name || name;
+        case 'type': return c.config?.type || '';
+        default: return '';
+      }
+    }
+
+    // ========== 初始化 ==========
+
+    function init(config) {
+      _windowConfig = config;
+      var title = config.title || config.name || '测试运行';
+      document.title = title;
+      document.getElementById('loading-overlay').style.display = 'none';
+
+      // 检测原生模式
+      _nativeMode = !!(config._native);
+      _ctrlMap = config._nativeCtrlMap || {};
+      logToEditor('[模式] native=' + _nativeMode + ', appMode=' + (config.appMode || 'html') + ', 组件=' + (config.components || []).length, 'info');
+
+      // 构建 ctrlConfigMap
+      (config.components || []).forEach(function(comp) {
+        _ctrlConfigMap[comp.name] = comp;
+      });
+
+      // 调试信息：显示组件映射和积木所属关系
+      var compNames = Object.keys(_ctrlConfigMap);
+      logToEditor('[组件映射] ' + compNames.length + ' 个组件: ' + compNames.join(', '), 'info');
+      var blocksData = config.blocksData || {};
+      var ownerMap = {};
+      Object.values(blocksData).forEach(function(b) {
+        var owner = b._ownerComponent || '(窗口级)';
+        ownerMap[owner] = (ownerMap[owner] || 0) + 1;
+      });
+      logToEditor('[积木所属] ' + JSON.stringify(ownerMap), 'info');
+
+      if (_nativeMode) {
+        // 原生模式：不创建 DOM，监听原生事件
+        logToEditor('原生窗口已启动: ' + title, 'info');
+        if (window.api && window.api.onNativeEvent) {
+          window.api.onNativeEvent(function(evt) {
+            var compName = evt.data;
+            var comp = _ctrlConfigMap[compName];
+            if (comp) {
+              _currentComponent = comp;
+              logToEditor('原生事件 [' + evt.eventType + ']: ' + compName, 'log');
+            }
+            if (evt.eventType === 'click') {
+              fireEvent('app_on_button_click', { name: compName });
+            } else if (evt.eventType === 'change') {
+              fireEvent('app_on_input_change', { name: compName });
+            } else if (evt.eventType === 'select') {
+              fireEvent('app_on_list_select', { name: compName });
+            }
+          });
+        }
+        executeStartBlocks();
+        return;
+      }
+
+      // HTML 模式：仅当有自定义 htmlContent 且无组件时才使用 iframe
+      if (config.htmlContent && (!config.components || config.components.length === 0)) {
+        _renderHtmlContent(config.htmlContent);
+        logToEditor('HTML 窗口已启动: ' + title, 'info');
+        return;
+      }
+
+      var container = document.getElementById('app-container');
+      container.style.background = config.backgroundColor || '#f0f0f0';
+      // 应用窗口全局样式属性
+      if (config.overflow) container.style.overflow = config.overflow;
+      if (config.padding) container.style.padding = config.padding + 'px';
+      // 应用自定义 CSS
+      if (config.customCSS) {
+        var styleEl = document.createElement('style');
+        styleEl.textContent = '#app-container { ' + config.customCSS + ' }';
+        document.head.appendChild(styleEl);
+      }
+
+      (config.components || []).forEach(function(comp) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'app-component';
+        wrapper.style.left = (comp.x || 10) + 'px';
+        wrapper.style.top = (comp.y || 10) + 'px';
+        wrapper.dataset.name = comp.name;
+
+        var el = createComponentEl(comp);
+        if (el) {
+          wrapper.appendChild(el);
+          container.appendChild(wrapper);
+          _components[comp.name] = { dom: el, wrapper: wrapper, config: comp };
+        }
+      });
+
+      executeStartBlocks();
+      logToEditor('窗口已启动: ' + title, 'info');
+    }
+
+    function _renderHtmlContent(html) {
+      var container = document.getElementById('app-container');
+      container.innerHTML = '';
+      container.style.cssText = 'width:100%;height:100%;position:relative;overflow:auto;';
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'width:100%;height:100%;border:none;';
+      iframe.sandbox = 'allow-scripts allow-forms allow-popups allow-same-origin';
+      container.appendChild(iframe);
+      var doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      try {
+        var origLog = iframe.contentWindow.console.log;
+        iframe.contentWindow.console.log = function() {
+          var args = Array.from(arguments).map(function(a) { return String(a); }).join(' ');
+          logToEditor(args, 'log');
+          origLog.apply(iframe.contentWindow.console, arguments);
+        };
+        iframe.contentWindow.console.error = function() {
+          var args = Array.from(arguments).map(function(a) { return String(a); }).join(' ');
+          logToEditor(args, 'error');
+          origLog.apply(iframe.contentWindow.console, arguments);
+        };
+      } catch(e) {}
+    }
+
+    // 应用组件样式属性（bgColor, textColor, fontSize, border, customCSS）
+    function _applyCompStyles(el, comp) {
+      if (!el || !comp) return;
+      if (comp.bgColor) el.style.backgroundColor = comp.bgColor;
+      if (comp.textColor) el.style.color = comp.textColor;
+      if (comp.fontSize) el.style.fontSize = comp.fontSize + 'px';
+      if (comp.border === 'none') {
+        el.style.border = 'none';
+        el.style.borderRadius = '0';
+      } else if (comp.border === 'rounded') {
+        el.style.borderRadius = '8px';
+      } else if (comp.border === 'circle') {
+        el.style.borderRadius = '50%';
+      }
+      // 应用自定义 CSS
+      if (comp.customCSS) {
+        try {
+          el.style.cssText += ';' + comp.customCSS;
+        } catch(e) { console.warn('组件自定义CSS应用失败:', e); }
+      }
+    }
+
+    function createComponentEl(comp) {
+      var el = null;
+      switch (comp.type) {
+        case 'button': {
+          el = document.createElement('button');
+          el.textContent = comp.text || comp.name;
+          el.style.cssText = 'padding:6px 16px;cursor:pointer;';
+          el.addEventListener('click', function() {
+            _currentComponent = comp;
+            logToEditor('按钮点击: ' + comp.name, 'log');
+            fireEvent('app_on_button_click', { name: comp.name });
+          });
+          break;
+        }
+        case 'input': {
+          el = document.createElement('input');
+          el.type = 'text';
+          el.value = comp.defaultValue || '';
+          el.placeholder = comp.name;
+          el.style.cssText = 'padding:4px 8px;';
+          if (comp.width) el.style.width = comp.width + 'px';
+          el.addEventListener('input', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'textarea': {
+          el = document.createElement('textarea');
+          el.value = comp.defaultValue || '';
+          el.placeholder = comp.name;
+          el.style.cssText = 'padding:4px 8px;resize:both;';
+          if (comp.width) el.style.width = comp.width + 'px';
+          if (comp.height) el.style.height = comp.height + 'px';
+          el.addEventListener('input', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'label': {
+          el = document.createElement('span');
+          el.textContent = comp.text || comp.name;
+          el.style.display = 'inline-block';
+          break;
+        }
+        case 'checkbox': {
+          el = document.createElement('label');
+          el.style.display = 'inline-flex';
+          el.style.alignItems = 'center';
+          el.style.gap = '4px';
+          el.style.cursor = 'pointer';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !!comp.defaultValue;
+          var cbLabel = document.createElement('span');
+          cbLabel.textContent = comp.text || comp.name;
+          el.appendChild(cb);
+          el.appendChild(cbLabel);
+          el._inputEl = cb;
+          cb.addEventListener('change', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'radio': {
+          el = document.createElement('label');
+          el.style.display = 'inline-flex';
+          el.style.alignItems = 'center';
+          el.style.gap = '4px';
+          el.style.cursor = 'pointer';
+          var rb = document.createElement('input');
+          rb.type = 'radio';
+          rb.name = comp.group || comp.name;
+          rb.checked = !!comp.defaultValue;
+          var rbLabel = document.createElement('span');
+          rbLabel.textContent = comp.text || comp.name;
+          el.appendChild(rb);
+          el.appendChild(rbLabel);
+          el._inputEl = rb;
+          rb.addEventListener('change', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'dropdown': {
+          el = document.createElement('select');
+          el.style.cssText = 'padding:4px 8px;';
+          if (comp.width) el.style.width = comp.width + 'px';
+          var items = comp.items || [];
+          if (typeof items === 'string') items = items.split(',');
+          items.forEach(function(item) {
+            var opt = document.createElement('option');
+            opt.value = String(item).trim();
+            opt.textContent = String(item).trim();
+            el.appendChild(opt);
+          });
+          el.addEventListener('change', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'slider': {
+          el = document.createElement('input');
+          el.type = 'range';
+          el.min = comp.min || 0;
+          el.max = comp.max || 100;
+          el.value = comp.defaultValue || 50;
+          if (comp.width) el.style.width = comp.width + 'px';
+          el.addEventListener('input', function() {
+            _currentComponent = comp;
+            fireEvent('app_on_input_change', { name: comp.name });
+          });
+          break;
+        }
+        case 'progress': {
+          el = document.createElement('progress');
+          el.min = comp.min || 0;
+          el.max = comp.max || 100;
+          el.value = comp.defaultValue || 0;
+          if (comp.width) el.style.width = comp.width + 'px';
+          break;
+        }
+        case 'list': {
+          el = document.createElement('select');
+          el.multiple = true;
+          el.size = 6;
+          if (comp.width) el.style.width = comp.width + 'px';
+          if (comp.height) el.style.height = comp.height + 'px';
+          _selectedListItems[comp.name] = null;
+          var listItems = comp.items || [];
+          if (typeof listItems === 'string') listItems = listItems.split(',');
+          listItems.forEach(function(item) {
+            var opt = document.createElement('option');
+            opt.value = String(item).trim();
+            opt.textContent = String(item).trim();
+            el.appendChild(opt);
+          });
+          el.addEventListener('change', function() {
+            _selectedListItems[comp.name] = el.value;
+          });
+          break;
+        }
+        case 'image': {
+          el = document.createElement('div');
+          el.style.display = 'inline-block';
+          if (comp.src) {
+            var imgEl = document.createElement('img');
+            imgEl.src = comp.src;
+            imgEl.alt = comp.name;
+            imgEl.style.maxWidth = '100%';
+            if (comp.width) imgEl.style.width = comp.width + 'px';
+            if (comp.height) imgEl.style.height = comp.height + 'px';
+            el.appendChild(imgEl);
+          } else {
+            el.style.padding = '8px';
+            el.style.border = '1px dashed #ccc';
+            el.style.background = '#fafafa';
+            el.textContent = '🖼️ ' + comp.name;
+          }
+          break;
+        }
+        case 'html': {
+          el = document.createElement('iframe');
+          el.style.cssText = 'border:none;background:#fff;';
+          el.sandbox = 'allow-scripts allow-forms allow-popups allow-same-origin';
+          if (comp.width) el.style.width = comp.width + 'px';
+          if (comp.height) el.style.height = comp.height + 'px';
+          if (comp.htmlContent) {
+            var hDoc = el.contentDocument || el.contentWindow.document;
+            hDoc.open(); hDoc.write(comp.htmlContent); hDoc.close();
+          }
+          break;
+        }
+        case 'canvas': {
+          el = document.createElement('canvas');
+          el.width = comp.width || 200;
+          el.height = comp.height || 150;
+          el.style.cssText = 'background:' + (comp.bgColor || '#ffffff') + ';border:1px solid #ccc;';
+          break;
+        }
+        default: {
+          el = document.createElement('div');
+          el.textContent = comp.name;
+          el.style.padding = '4px';
+          el.style.border = '1px dashed #999';
+          break;
+        }
+      }
+      // 统一应用样式属性
+      _applyCompStyles(el, comp);
+      return el;
+    }
+
+    // ========== 积木执行 ==========
+    // 解析积木的所属组件配置（从 _ownerComponent 标记获取）
+    function _resolveOwnerComp(block) {
+      if (block && block._ownerComponent && _ctrlConfigMap[block._ownerComponent]) {
+        return _ctrlConfigMap[block._ownerComponent];
+      }
+      return null;
+    }
+
+    // 获取当前组件上下文：优先从当前正在执行的积木的 _ownerComponent 查找
+    function _getCurrentComp(scope) {
+      // 优先 scope 中设置的（事件触发时设置）
+      if (scope && scope.__currentComponent) return scope.__currentComponent;
+      // 其次全局变量（兑容旧逻辑）
+      return _currentComponent;
+    }
+
+    // 从积木对象直接解析其所属组件配置
+    function _getCompForBlock(block) {
+      if (block && block._ownerComponent) {
+        return _ctrlConfigMap[block._ownerComponent] || null;
+      }
+      return null;
+    }
+
+    function executeStartBlocks() {
+      var blocks = _windowConfig.blocksData || {};
+      var starts = Object.values(blocks).filter(function(b) { return b.type === 'app_on_window_start'; });
+      if (starts.length === 0) {
+        logToEditor('无启动事件积木', 'log');
+        return;
+      }
+      starts.forEach(function(sb) {
+        // 每个启动积木用其所属组件上下文执行
+        var scope = { __currentComponent: _resolveOwnerComp(sb) };
+        executeChain(sb, blocks, scope).catch(function(e) { logToEditor('启动错误: ' + e.message, 'error'); });
+      });
+
+      Object.values(blocks).filter(function(b) { return b.type === 'app_on_timer'; }).forEach(function(tb) {
+        var sec = Number(tb.params?.sec || 1);
+        var timerScope = { __currentComponent: _resolveOwnerComp(tb) };
+        var id = setInterval(function() {
+          executeChain(tb, blocks, Object.assign({}, timerScope)).catch(function(e) { logToEditor('定时器错误: ' + e.message, 'error'); });
+        }, Math.max(sec * 1000, 50));
+        _timers.push(id);
+      });
+
+      var keyBlocks = Object.values(blocks).filter(function(b) { return b.type === 'app_on_key_pressed'; });
+      if (keyBlocks.length > 0) {
+        document.addEventListener('keydown', function(e) {
+          var key = e.key.toLowerCase();
+          keyBlocks.forEach(function(kb) {
+            if ((kb.params?.key || '').toLowerCase() === key) {
+              var scope = { __currentComponent: _resolveOwnerComp(kb) };
+              executeChain(kb, blocks, scope).catch(function(err) { logToEditor('按键错误: ' + err.message, 'error'); });
+            }
+          });
+        });
+      }
+    }
+
+    function fireEvent(type, params) {
+      var blocks = _windowConfig.blocksData || {};
+      Object.values(blocks).filter(function(b) { return b.type === type; }).forEach(function(b) {
+        if (params.name && b.params?.name && b.params.name !== params.name) return;
+        // 组件上下文：优先从参数名获取，其次从积木的 _ownerComponent 获取
+        var compCtx = null;
+        if (params.name && _ctrlConfigMap[params.name]) {
+          compCtx = _ctrlConfigMap[params.name];
+          _currentComponent = compCtx; // 同时更新全局变量（兑容旧逻辑）
+        } else if (b._ownerComponent && _ctrlConfigMap[b._ownerComponent]) {
+          compCtx = _ctrlConfigMap[b._ownerComponent];
+        }
+        var scope = { __currentComponent: compCtx };
+        executeChain(b, blocks, scope).catch(function(e) { logToEditor('事件错误: ' + e.message, 'error'); });
+      });
+    }
+
+    async function executeChain(start, blocks, scope) {
+      var cur = start;
+      while (cur) { await executeBlock(cur, blocks, scope); cur = cur.flowOut ? blocks[cur.flowOut] : null; }
+    }
+
+    async function executeBlock(block, blocks, scope) {
+      // 解析参数：优先使用 paramConnections 中连接的 reporter 积木的值
+      var p = block.params || {};
+      if (block.paramConnections) {
+        var resolved = Object.assign({}, p);
+        for (var paramName in block.paramConnections) {
+          var connId = block.paramConnections[paramName];
+          var reporter = blocks[connId];
+          if (reporter) {
+            var result = await executeBlock(reporter, blocks, scope);
+            if (result !== undefined) {
+              resolved[paramName] = result;
+            }
+          }
+        }
+        p = resolved;
+      }
+      var type = block.type;
+      switch (type) {
+        case 'app_on_window_start': case 'app_on_window_close': case 'app_on_window_resize':
+        case 'app_on_button_click': case 'app_on_input_change':
+        case 'app_on_key_pressed': case 'app_on_timer': break;
+
+        // 控件操作 — 统一属性设置/获取
+        case 'app_set_prop': {
+          var comp = p.component;
+          var props = p.prop;      // 可以是字符串或列表
+          var ops = p.op;          // 可以是字符串或列表
+          var values = p.value;    // 可以是字符串或列表
+          // 支持批量设置：如果 props 是列表，则批量设置每个属性
+          if (Array.isArray(props)) {
+            for (var i = 0; i < props.length; i++) {
+              var prop = props[i];
+              var op = Array.isArray(ops) ? (ops[i] || ops[0] || '=') : ops;
+              var val = Array.isArray(values) ? (values[i] || values[0]) : values;
+              await _applyProp(comp, prop, op, val);
+            }
+          } else {
+            await _applyProp(comp, props, ops, values);
+          }
+          break;
+        }
+        case 'app_get_prop': {
+          return await _getProp(p.component, p.prop);
+        }
+        case 'app_list_add_item': { _ctrlListAdd(p.name, p.item); break; }
+        case 'app_list_clear': { _ctrlListClear(p.name); break; }
+        case 'app_show_component': { _ctrlShow(p.name); break; }
+        case 'app_hide_component': { _ctrlHide(p.name); break; }
+
+        case 'app_set_window_title': {
+          var t = String(p.title);
+          if (_nativeMode) {
+            _nativeSend({ action: 'setTitle', title: t });
+          } else {
+            document.title = t;
+          }
+          logToEditor('窗口标题: ' + t, 'log');
+          break;
+        }
+
+        // ========== 多窗口操作 ==========
+        case 'app_open_window': {
+          var targetName = String(p.name);
+          var targetWin = (_windowConfig.allWindows || []).find(function(w) { return w.name === targetName; });
+          if (!targetWin) {
+            logToEditor('找不到窗口: ' + targetName, 'warn');
+            break;
+          }
+          // 收集目标窗口的积木
+          var targetScripts = {};
+          if (targetWin.blocksData) Object.assign(targetScripts, targetWin.blocksData);
+          (targetWin.components || []).forEach(function(comp) {
+            if (comp.blocksData) Object.assign(targetScripts, comp.blocksData);
+          });
+          if (window.api && window.api.appOpenTestWindow) {
+            window.api.appOpenTestWindow({
+              title: targetWin.title || targetWin.name,
+              name: targetWin.name,
+              width: targetWin.width || 800,
+              height: targetWin.height || 600,
+              components: targetWin.components || [],
+              blocksData: targetScripts,
+              appConfig: _windowConfig.appConfig,
+              appMode: _windowConfig.appMode || 'win',
+              allWindows: _windowConfig.allWindows,
+              backgroundColor: targetWin.backgroundColor || '#f0f0f0',
+              customCSS: targetWin.customCSS || '',
+              overflow: targetWin.overflow || 'auto',
+              padding: targetWin.padding || 0,
+            });
+            logToEditor('打开窗口: ' + targetName, 'log');
+          }
+          break;
+        }
+        case 'app_close_window': {
+          var targetName = String(p.name);
+          if (window.api && window.api.appCloseTestWindow) {
+            window.api.appCloseTestWindow(targetName === '当前窗口' ? null : targetName);
+            logToEditor('关闭窗口: ' + targetName, 'log');
+          }
+          break;
+        }
+        case 'app_close_current_window': {
+          if (window.api && window.api.appCloseTestWindow) {
+            window.api.appCloseTestWindow(null);
+          }
+          break;
+        }
+        case 'app_switch_window': {
+          var targetName = String(p.name);
+          var targetWin = (_windowConfig.allWindows || []).find(function(w) { return w.name === targetName; });
+          if (!targetWin) {
+            logToEditor('找不到窗口: ' + targetName, 'warn');
+            break;
+          }
+          var targetScripts = {};
+          if (targetWin.blocksData) Object.assign(targetScripts, targetWin.blocksData);
+          (targetWin.components || []).forEach(function(comp) {
+            if (comp.blocksData) Object.assign(targetScripts, comp.blocksData);
+          });
+          if (window.api && window.api.appSwitchTestWindow) {
+            window.api.appSwitchTestWindow({
+              title: targetWin.title || targetWin.name,
+              name: targetWin.name,
+              width: targetWin.width || 800,
+              height: targetWin.height || 600,
+              components: targetWin.components || [],
+              blocksData: targetScripts,
+              appConfig: _windowConfig.appConfig,
+              appMode: _windowConfig.appMode || 'win',
+              allWindows: _windowConfig.allWindows,
+              backgroundColor: targetWin.backgroundColor || '#f0f0f0',
+              customCSS: targetWin.customCSS || '',
+              overflow: targetWin.overflow || 'auto',
+              padding: targetWin.padding || 0,
+            });
+            logToEditor('切换到窗口: ' + targetName, 'log');
+          }
+          break;
+        }
+        case 'app_set_window_size': {
+          var ww = Number(p.w) || 800;
+          var hh = Number(p.h) || 600;
+          if (_nativeMode) {
+            _nativeSend({ action: 'setSize', width: ww, height: hh });
+          } else {
+            window.resizeTo(ww, hh);
+          }
+          logToEditor('窗口大小: ' + ww + 'x' + hh, 'log');
+          break;
+        }
+        case 'app_alert': { alert(p.msg); break; }
+        case 'app_confirm': { return confirm(p.msg); }
+        case 'app_prompt': { return prompt(p.msg) || ''; }
+        case 'app_console_log': { logToEditor(String(p.text), 'log'); break; }
+        case 'app_console_warn': { logToEditor(String(p.text), 'warn'); break; }
+        case 'app_console_error': { logToEditor(String(p.text), 'error'); break; }
+        case 'app_save_storage': { _storage[p.key] = p.val; break; }
+        case 'app_load_storage': { return _storage[p.key] || ''; }
+        case 'wait': { await new Promise(function(r) { setTimeout(r, Number(p.sec) * 1000); }); break; }
+        case 'repeat': {
+          var t = Number(p.times); var bodyId = block.subBlocks?.body;
+          if (bodyId && blocks[bodyId]) for (var i = 0; i < t; i++) { scope._index = i; await executeChain(blocks[bodyId], blocks, scope); }
+          break;
+        }
+        case 'forever': {
+          var bodyId = block.subBlocks?.body;
+          if (bodyId && blocks[bodyId]) while (true) { await executeChain(blocks[bodyId], blocks, scope); await new Promise(function(r) { setTimeout(r, 16); }); }
+          break;
+        }
+        case 'if_then': {
+          var cond = await resolveVal(p.cond, block, blocks, scope);
+          if (cond) { var bodyId = block.subBlocks?.body; if (bodyId && blocks[bodyId]) await executeChain(blocks[bodyId], blocks, scope); }
+          break;
+        }
+        case 'if_else': {
+          var cond = await resolveVal(p.cond, block, blocks, scope);
+          var sub = cond ? 'then' : 'else'; var bodyId = block.subBlocks?.[sub];
+          if (bodyId && blocks[bodyId]) await executeChain(blocks[bodyId], blocks, scope);
+          break;
+        }
+        case 'var_set': { _vars[p.name] = await resolveVal(p.val, block, blocks, scope); break; }
+        case 'var_change': { _vars[p.name] = (Number(_vars[p.name]) || 0) + Number(p.val); break; }
+        case 'var_get': { return _vars[p.name] ?? 0; }
+        case 'op_add': return Number(await resolveVal(p.a, block, blocks, scope)) + Number(await resolveVal(p.b, block, blocks, scope));
+        case 'op_sub': return Number(await resolveVal(p.a, block, blocks, scope)) - Number(await resolveVal(p.b, block, blocks, scope));
+        case 'op_mul': return Number(await resolveVal(p.a, block, blocks, scope)) * Number(await resolveVal(p.b, block, blocks, scope));
+        case 'op_div': return Number(await resolveVal(p.a, block, blocks, scope)) / Number(await resolveVal(p.b, block, blocks, scope));
+        case 'io_print': case 'io_print_line': case 'io_log': { logToEditor(String(p.text), 'log'); break; }
+        case 'func_define': break;
+        case 'func_call': {
+          var fnDef = Object.values(blocks).find(function(b) { return b.type === 'func_define' && b.params?.name === p.name; });
+          if (fnDef?.flowOut && blocks[fnDef.flowOut]) await executeChain(blocks[fnDef.flowOut], blocks, {});
+          break;
+        }
+
+        // 控件读取 — 统一使用抽象层（async）
+        case 'app_get_input_value': { return await _ctrlGetValue(p.name); }
+        case 'app_get_label_text': { return await _ctrlGetText(p.name); }
+        case 'app_list_get_selected': { return await _ctrlListSelected(p.name); }
+        case 'app_get_window_width': { return _nativeMode ? (_windowConfig.width || 800) : window.innerWidth; }
+        case 'app_get_window_height': { return _nativeMode ? (_windowConfig.height || 600) : window.innerHeight; }
+
+        // ========== 当前组件积木（直接从积木的 _ownerComponent 查找所属组件） ==========
+        case 'app_get_current_component': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? Object.assign({}, cc) : null; }
+        case 'app_get_current_comp_name': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.name || '') : ''; }
+        case 'app_get_current_comp_type': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.type || '') : ''; }
+        case 'app_get_current_comp_text': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? await _ctrlGetText(cc.name) : ''; }
+        case 'app_get_current_comp_value': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? await _ctrlGetValue(cc.name) : ''; }
+        case 'app_get_current_comp_x': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.x || 0) : 0; }
+        case 'app_get_current_comp_y': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.y || 0) : 0; }
+        case 'app_get_current_comp_width': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.width || 0) : 0; }
+        case 'app_get_current_comp_height': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? (cc.height || 0) : 0; }
+        case 'app_get_current_comp_visible': { var cc = _getCompForBlock(block) || _getCurrentComp(scope); return cc ? await _ctrlGetVisible(cc.name) : false; }
+
+        // ========== HTML 嵌入积木 ==========
+        case 'app_set_html': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'IFRAME') {
+            var hDoc = c.dom.contentDocument || c.dom.contentWindow.document;
+            hDoc.open(); hDoc.write(String(p.html)); hDoc.close();
+          } else if (c && c.dom) {
+            c.dom.innerHTML = String(p.html);
+          }
+          break;
+        }
+        case 'app_get_html': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'IFRAME') {
+            var hDoc = c.dom.contentDocument || c.dom.contentWindow.document;
+            return hDoc.body ? hDoc.body.innerHTML : '';
+          }
+          return c && c.dom ? (c.dom.innerHTML || '') : '';
+        }
+
+        // ========== 画布积木 ==========
+        case 'app_canvas_line': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            var ctx = c.dom.getContext('2d');
+            ctx.strokeStyle = c.dom._strokeColor || '#000';
+            ctx.lineWidth = c.dom._strokeSize || 2;
+            ctx.beginPath();
+            ctx.moveTo(Number(p.x1), Number(p.y1));
+            ctx.lineTo(Number(p.x2), Number(p.y2));
+            ctx.stroke();
+          } else if (_nativeMode) {
+            logToEditor('原生模式不支持画布操作，请切换到 HTML 模式', 'warn');
+          }
+          break;
+        }
+        case 'app_canvas_rect': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            var ctx = c.dom.getContext('2d');
+            ctx.strokeStyle = c.dom._strokeColor || '#000';
+            ctx.lineWidth = c.dom._strokeSize || 2;
+            if (c.dom._fillColor) { ctx.fillStyle = c.dom._fillColor; ctx.fillRect(Number(p.x), Number(p.y), Number(p.w), Number(p.h)); }
+            ctx.strokeRect(Number(p.x), Number(p.y), Number(p.w), Number(p.h));
+          } else if (_nativeMode) {
+            logToEditor('原生模式不支持画布操作，请切换到 HTML 模式', 'warn');
+          }
+          break;
+        }
+        case 'app_canvas_circle': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            var ctx = c.dom.getContext('2d');
+            ctx.strokeStyle = c.dom._strokeColor || '#000';
+            ctx.lineWidth = c.dom._strokeSize || 2;
+            ctx.beginPath();
+            ctx.arc(Number(p.x), Number(p.y), Number(p.r), 0, Math.PI * 2);
+            if (c.dom._fillColor) { ctx.fillStyle = c.dom._fillColor; ctx.fill(); }
+            ctx.stroke();
+          } else if (_nativeMode) {
+            logToEditor('原生模式不支持画布操作，请切换到 HTML 模式', 'warn');
+          }
+          break;
+        }
+        case 'app_canvas_text': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            var ctx = c.dom.getContext('2d');
+            ctx.fillStyle = c.dom._strokeColor || '#000';
+            ctx.font = (c.dom._strokeSize ? c.dom._strokeSize * 7 : 14) + 'px sans-serif';
+            ctx.fillText(String(p.text), Number(p.x), Number(p.y));
+          } else if (_nativeMode) {
+            logToEditor('原生模式不支持画布操作，请切换到 HTML 模式', 'warn');
+          }
+          break;
+        }
+        case 'app_canvas_clear': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            var ctx = c.dom.getContext('2d');
+            ctx.clearRect(0, 0, c.dom.width, c.dom.height);
+          } else if (_nativeMode) {
+            logToEditor('原生模式不支持画布操作，请切换到 HTML 模式', 'warn');
+          }
+          break;
+        }
+        case 'app_canvas_set_style': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            c.dom._strokeColor = String(p.color);
+            c.dom._strokeSize = Number(p.size);
+          } else if (_nativeMode) {
+            _nativeStrokeColor = String(p.color);
+            _nativeStrokeSize = Number(p.size);
+          }
+          break;
+        }
+        case 'app_canvas_fill': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') {
+            c.dom._fillColor = String(p.color);
+          } else if (_nativeMode) {
+            _nativeFillColor = String(p.color);
+          }
+          break;
+        }
+        case 'app_canvas_get_width': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') return c.dom.width;
+          return 0;
+        }
+        case 'app_canvas_get_height': {
+          var c = _components[p.component];
+          if (c && c.dom && c.dom.tagName === 'CANVAS') return c.dom.height;
+          return 0;
+        }
+
+        // 常量
+        case 'op_pi': return Math.PI;
+        case 'op_e': return Math.E;
+        case 'op_newline': return '\n';
+
+        default: break;
+      }
+      await new Promise(function(r) { setTimeout(r, 1); });
+    }
+
+    // resolveVal 已被内联的参数解析逻辑替代，保留兼容
+    async function resolveVal(val, block, blocks, scope) {
+      if (block?.paramConnections) {
+        for (var pn in block.paramConnections) {
+          var rid = block.paramConnections[pn];
+          var r = blocks[rid];
+          if (r) { var result = await executeBlock(r, blocks, scope); if (result !== undefined) return result; }
+        }
+      }
+      return val;
+    }
+
+    function logToEditor(msg, type) {
+      if (window.api?.appTestLog) window.api.appTestLog(msg, type || 'log');
+      console.log('[' + (type || 'log') + '] ' + msg);
+    }
+
+    if (window.api?.onAppTestInit) {
+      window.api.onAppTestInit(init);
+    } else {
+      document.getElementById('loading-overlay').textContent = '需要 Electron 环境';
+    }
+
+    window.addEventListener('beforeunload', function() {
+      _timers.forEach(function(id) { clearInterval(id); });
+      logToEditor('窗口已关闭', 'info');
+    });
+  </script>
+</body>
+</html>

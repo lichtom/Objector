@@ -1,0 +1,47 @@
+module.exports = {
+  packagerConfig: {
+    asar: true,
+    icon: './Objector2',
+    ignore: [
+      '^/out($|/)',
+      '^/build($|/)',
+      '^/dist($|/)',
+      '^/proj($|/)',
+      '^/tests($|/)',
+      '^/examples($|/)',
+      '^/宣传片($|/)',
+      '^/服务器($|/)',
+      '^/docs($|/)',
+      '^/buildtemp($|/)',
+      '^/\\.npm',
+      '^/scripts',
+      '^/forge\\.config\\.mac\\.js$',
+      '^/build-app\\.js$',
+      '^/_diag\\.js$',
+      '^/make-linux-zip\\.js$',
+      '^/insert_cmd_handler\\.js$',
+      '^/temp_cmd_handler\\.txt$',
+      '^/review\\.png$',
+      '^/test-export-preview\\.html$',
+      '^/upload.*\\.ps1$',
+      '^/delete-asset\\.ps1$',
+      '^/sync-docs\\.ps1$',
+    ],
+  },
+  rebuildConfig: {},
+  makers: [
+    {
+      name: '@electron-forge/maker-squirrel',
+      config: {
+        name: 'Objector',
+        authors: 'Objector',
+        setupIcon: require('path').resolve(__dirname, 'Objector2.ico'),
+        iconUrl: 'file:///' + require('path').resolve(__dirname, 'Objector2.ico').replace(/\\/g, '/'),
+      },
+    },
+    {
+      name: '@electron-forge/maker-zip',
+      platforms: ['win32', 'darwin', 'linux'],
+    },
+  ],
+};
