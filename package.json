@@ -1,7 +1,7 @@
 {
   "name": "objector",
   "productName": "Objector",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "图形化积木编程编辑器",
   "author": "Objector",
   "main": "src/main.js",
