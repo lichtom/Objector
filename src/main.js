@@ -366,6 +366,8 @@ ipcMain.handle('read-file', async (_e, filePath) => {
     const content = fs.readFileSync(filePath, 'utf-8');
     return content;
   } catch (err) {
+    // 文件不存在属于可选资源的正常情况(如项目首次打开时 code/scripts 尚未保存), 静默返回 null
+    if (err && err.code === 'ENOENT') return null;
     console.error('[read-file] 失败:', filePath, err.message);
     return null;
   }

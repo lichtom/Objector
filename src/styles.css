@@ -976,11 +976,15 @@ input, textarea, [contenteditable="true"] {
 }
 
 /* ===== Code Programming Mode ===== */
+/* 代码模式: #code-layout 作为 main-layout 的中间列, 右侧保留角色/音频栏, 舞台在面板窗口 */
 #code-layout {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border);
 }
 #code-toolbar {
   height: var(--toolbar-h);
@@ -1055,30 +1059,12 @@ input, textarea, [contenteditable="true"] {
   word-break: break-all;
   line-height: 1.5;
 }
-#code-input-bar {
-  display: flex;
-  gap: 6px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-#code-input-bar.hidden {
-  display: none;
-}
-#code-stdin-input {
-  flex: 1;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  padding: 5px 10px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 13px;
-  outline: none;
-}
-#code-stdin-input:focus {
-  border-color: var(--accent);
-}
+
+/* ALB 语法高亮补充样式（material-darker 主题未定义或部分缺失的 token 类）*/
+#code-editor-wrap .cm-builtin { color:#61afef; }
+#code-editor-wrap .cm-variable-3 { color:#56b6c2; }
+#code-editor-wrap .cm-meta { color:#c678dd; }
+#code-editor-wrap .cm-bracket { color:#89b4fa; }
 
 /* CodeMirror hint dropdown */
 .CodeMirror-hints {

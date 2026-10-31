@@ -384,10 +384,6 @@
         <div id="code-output-wrap" class="hidden">
           <div id="code-output-header">输出</div>
           <pre id="code-output"></pre>
-          <div id="code-input-bar" class="hidden">
-            <input id="code-stdin-input" type="text" placeholder="输入内容后按 Enter..." autocomplete="off" spellcheck="false" />
-            <button id="code-stdin-send" class="tb-btn tb-run">发送</button>
-          </div>
         </div>
       </div>
     </div>
@@ -698,6 +694,13 @@
   <script src="core/microbit-compiler.js"></script>
   <script src="core/block-code-converter.js"></script>
   <script src="core/sb3-importer.js"></script>
+  <!-- 代码编程模式: 解释器 + 运行时 (interpreter/ 目录) -->
+  <script src="../interpreter/alb.js"></script>
+  <script src="../interpreter/skulpt.min.js"></script>
+  <script src="../interpreter/skulpt-stdlib.js"></script>
+  <script src="../interpreter/python.js"></script>
+  <script src="core/code-runtime.js"></script>
+  <script src="core/codemirror-alb.js"></script>
   <script src="editor-app.js"></script>
 </body>
 </html>

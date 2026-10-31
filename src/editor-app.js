@@ -389,7 +389,8 @@ window.EditorApp = (function () {
     console.log('[Panel] _initPanels called, projectMode:', EditorState.projectMode, 'api:', !!window.api, 'openPanels:', !!(window.api && window.api.openPanels));
     if (_panelsOpened) { console.log('[Panel] already opened, skip'); return; }
     if (!window.api || !window.api.openPanels) { console.warn('[Panel] API not available'); return; }
-    if (EditorState.projectMode && EditorState.projectMode !== 'normal' && EditorState.projectMode !== 'advanced') { console.log('[Panel] not normal/advanced mode, skip'); return; }
+    const _pm0 = EditorState.projectMode || 'normal';
+    if (_pm0 !== 'normal' && _pm0 !== 'advanced' && !_pm0.startsWith('code-')) { console.log('[Panel] mode ' + _pm0 + ' 不打开面板, skip'); return; }
     console.log('[Panel] Opening panels...');
     window.api.openPanels().then(() => {
       _panelsOpened = true;
@@ -1724,26 +1725,33 @@ window.EditorApp = (function () {
         'isNaN', 'isFinite', 'setTimeout', 'setInterval', 'clearTimeout',
         'clearInterval', 'fetch', 'alert', 'prompt', 'confirm',
       ],
-      'text/x-c++src': [
-        'alignas', 'alignof', 'and', 'asm', 'auto', 'bitand', 'bitor',
-        'bool', 'break', 'case', 'catch', 'char', 'class', 'compl',
-        'concept', 'const', 'consteval', 'constexpr', 'continue', 'co_await',
-        'co_return', 'co_yield', 'decltype', 'default', 'delete', 'do',
-        'double', 'else', 'enum', 'explicit', 'export', 'extern', 'false',
-        'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long',
-        'mutable', 'namespace', 'new', 'noexcept', 'not', 'nullptr', 'operator',
-        'or', 'private', 'protected', 'public', 'register', 'requires',
-        'return', 'short', 'signed', 'sizeof', 'static', 'struct', 'switch',
-        'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid',
-        'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile',
-        'wchar_t', 'while', 'xor',
-        // 标准库
-        'std', 'cout', 'cin', 'endl', 'string', 'vector', 'map', 'set',
-        'array', 'pair', 'queue', 'stack', 'algorithm', 'iostream',
+      'text/x-alb': [
+        // ALB 语法关键字
+        'if', 'when', 'while', 'for-i', 'cond', 'let', 'let*', 'letrec', 'const', 'define',
+        'set', 'func', 'do', 'def', 'try', 'match', 'quote', 'list', 'struct', 'export',
+        // Objector 游戏 API
+        'move', 'turn_right', 'turn_left', 'goto_xy', 'set_x', 'set_y', 'get_x', 'get_y',
+        'say', 'say_for', 'think', 'clear_say', 'show', 'hide', 'set_size', 'change_size',
+        'set_sprite', 'sprite_name', 'key_pressed', 'mouse_x', 'mouse_y', 'mouse_down',
+        'random_int', 'get_var', 'set_var', 'change_var', 'has_var', 'play_sound',
+        'touching_edge', 'touching_sprite', 'distance_to', 'timer_now', 'print', 'log',
       ],
     };
 
-    const words = keywords[cmMode] || keywords['javascript'];
+    // Objector 游戏 API（所有语言通用, 附加到补全字典）
+    const GAME_API_WORDS = [
+      'sprite', 'stage', 'globalVars',
+      'move', 'turn_right', 'turn_left', 'turnRight', 'turnLeft', 'goto_xy', 'goTo',
+      'set_x', 'set_y', 'get_x', 'get_y', 'change_x', 'change_y', 'set_x', 'set_y',
+      'say', 'say_for', 'sayFor', 'think', 'clear_say', 'show', 'hide',
+      'set_size', 'change_size', 'setSize', 'point_in_direction', 'bounce_edge',
+      'set_sprite', 'sprite_name', 'sprite_count', 'key_pressed', 'mouse_x', 'mouse_y',
+      'mouse_down', 'random_int', 'get_var', 'set_var', 'change_var', 'has_var',
+      'play_sound', 'stop_sounds', 'set_volume', 'touching_edge', 'touching_sprite',
+      'distance_to', 'sprite_x', 'sprite_y', 'timer_now', 'stage_width', 'stage_height', 'log',
+      'thread_spawn', 'thread_kill', 'thread_list', 'thread_id',
+    ];
+    const words = (keywords[cmMode] || keywords['javascript']).concat(GAME_API_WORDS.filter(w => !(keywords[cmMode] || []).includes(w)));
 
     // 自定义 hint 函数
     function wordHint(cm) {
@@ -1774,7 +1782,7 @@ window.EditorApp = (function () {
     }
 
     // 注册到 CodeMirror
-    CodeMirror.registerHelper('hint', cmMode.includes('python') ? 'python' : (cmMode === 'text/x-c++src' ? 'clike' : 'javascript-custom'), wordHint);
+    CodeMirror.registerHelper('hint', cmMode.includes('python') ? 'python' : 'javascript-custom', wordHint);
 
     // 输入时自动弹出补全（防抖 300ms）
     let debounceTimer = null;
@@ -1792,52 +1800,111 @@ window.EditorApp = (function () {
     });
   }
 
-  function initCodeMode(mode) {
-    if (_codeModeInitialized) return;
-    _codeModeInitialized = true;
+  /** 代码编程模式语言配置: 用代码编写 Objector 游戏（渲染进程内解释执行, 保留舞台） */
+  const CODE_LANG_CONFIG = {
+    'code-python': {
+      label: 'Python', cmMode: 'python', ext: 'py', runner: 'python',
+      template:
+        '# Objector 代码编程 · Python\n' +
+        '# 代码每隔一帧执行一次(约10帧/秒), 用 get_var/set_var 在帧之间保持状态\n' +
+        '# 常用API: move(10) turn_right(15) say("你好") goto_xy(0,0) key_pressed("space")\n' +
+        '# 用 set_sprite("角色名") 切换代码操作的角色\n' +
+        '# 多线程: def worker(): ...  t = thread_spawn(worker)  thread_kill(t)  thread_id()\n\n' +
+        'if not has_var("started"):\n' +
+        '    say("你好, 我是 Python!")\n' +
+        '    set_var("started", 1)\n\n' +
+        'move(2)\n' +
+        'if get_x() > 230:\n' +
+        '    set_x(-230)\n',
+    },
+    'code-javascript': {
+      label: 'JavaScript', cmMode: 'javascript', ext: 'js', runner: 'javascript',
+      template:
+        '// Objector 代码编程 · JavaScript\n' +
+        '// 代码每隔一帧执行一次(约30帧/秒), 用 globalVars 在帧之间保持状态\n' +
+        '// 对象: sprite(x/y/direction/size/say/move...), stage(鼠标/键盘/角色列表)\n' +
+        '// 平铺函数同样可用: say("你好"), move(10), key_pressed("space"), set_var("hp",100)\n' +
+        '// 多线程: const t = thread_spawn(() => { ... }, 50); thread_kill(t); thread_id()\n\n' +
+        'sprite.x += 2;\n' +
+        'if (sprite.x > 230) sprite.x = -230;\n' +
+        'if (!globalVars.greeted) { sprite.say("你好, 我是 JavaScript!"); globalVars.greeted = true; }\n',
+    },
+    'code-alb': {
+      label: 'ALB', cmMode: 'text/x-alb', ext: 'alb', runner: 'alb',
+      template:
+        '; Objector 代码编程 · ALB (Objector 独有语言)\n' +
+        '; 代码每隔一帧执行一次(约30帧/秒), 用 get_var/set_var 在帧之间保持状态\n' +
+        '; 可用函数: move turn_right say goto_xy key_pressed get_var set_var ...\n' +
+        '; 多线程: (thread_spawn (func () (move 1))) 返回线程id; thread_kill id / thread_id\n\n' +
+        '(if (== (get_var "started" 0) 0)\n' +
+        '    (do (say "你好, 我是 ALB!")\n' +
+        '        (set_var "started" 1)))\n\n' +
+        '(move 2)\n' +
+        '(if (> (get_x) 230) (set_x -230))\n',
+    },
+  };
 
-    // 语言和 CodeMirror 模式映射
-    const langConfig = {
-      'code-python':     { label: 'Python',     cmMode: 'python',         ext: 'py',  template: '# Python\nprint("Hello, World!")\n' },
-      'code-cpp':        { label: 'C++',        cmMode: 'text/x-c++src',  ext: 'cpp', template: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}\n' },
-      'code-javascript': { label: 'JavaScript', cmMode: 'javascript',     ext: 'js',  template: '// JavaScript\nconsole.log("Hello, World!");\n' },
-    };
-    const cfg = langConfig[mode] || langConfig['code-python'];
-    console.log(`[代码编程模式] ${cfg.label} 已初始化`);
+  /** 取当前项目模式的语音配置（动态读取, 切换项目后依然正确） */
+  function _codeCfg() {
+    return CODE_LANG_CONFIG[EditorState.projectMode] || CODE_LANG_CONFIG['code-python'];
+  }
 
-    // 隐藏所有其他布局
-    document.getElementById('main-layout')?.classList.add('hidden');
+  /** 代码模式布局: 保留右侧角色/音频栏与舞台面板窗口, 中间积木编辑区替换为代码编辑器 */
+  function _applyCodeLayout() {
+    const mainLayout = document.getElementById('main-layout');
+    const codeLayout = document.getElementById('code-layout');
+    const rightPanel = document.getElementById('right-panel');
+    if (!mainLayout || !codeLayout) return;
+    // 隐藏与代码模式互斥的布局
     document.getElementById('advanced-layout')?.classList.add('hidden');
     document.getElementById('data-layout')?.classList.add('hidden');
     document.getElementById('mc-layout')?.classList.add('hidden');
-    document.getElementById('toolbar')?.classList.add('hidden');
+    // 主布局保持显示（保留右侧角色/音频栏, 即"保留舞台等"）
+    mainLayout.classList.remove('hidden');
     document.getElementById('palette-panel')?.classList.add('hidden');
-    document.getElementById('stage-panel')?.classList.add('hidden');
+    document.getElementById('editor-panel')?.classList.add('hidden');
+    document.getElementById('toolbar')?.classList.add('hidden');
+    // 将代码编辑区插入 main-layout 中间位置
+    if (codeLayout.parentNode !== mainLayout) mainLayout.insertBefore(codeLayout, rightPanel || null);
+    codeLayout.classList.remove('hidden');
+    // 舞台使用独立面板窗口（与普通模式相同）
+    _lastStageJSON = '';
+    _initPanels();
+  }
 
-    // 显示代码编辑器布局
-    const codeLayout = document.getElementById('code-layout');
-    if (codeLayout) codeLayout.classList.remove('hidden');
+  function initCodeMode(mode) {
+    const cfg = CODE_LANG_CONFIG[mode] || CODE_LANG_CONFIG['code-python'];
+    _applyCodeLayout();
+    console.log(`[代码编程模式] ${cfg.label} (游戏代码编辑, 保留舞台)`);
 
     // 更新语言标签
     const langLabel = document.getElementById('code-lang-label');
     if (langLabel) langLabel.textContent = cfg.label;
 
+    if (_codeModeInitialized) {
+      // 已初始化: 仅切换编辑器语言模式并重新加载对应代码文件
+      if (_codeEditor) {
+        try { _codeEditor.setOption('mode', cfg.cmMode); } catch (e) { /* ignore */ }
+        _loadCodeFile(cfg.ext).then(code => {
+          if (_codeEditor) {
+            _codeEditor.setValue(code || cfg.template);
+            setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
+          }
+        });
+      }
+      setTimeout(() => { if (_codeEditor) _codeEditor.refresh(); }, 200);
+      return;
+    }
+    _codeModeInitialized = true;
+
     // 初始化 CodeMirror
     const editorWrap = document.getElementById('code-editor-wrap');
     if (editorWrap && typeof CodeMirror !== 'undefined' && !_codeEditor) {
-      // 临时显示布局以正确计算尺寸
-      const wasHidden = codeLayout.classList.contains('hidden');
-      if (wasHidden) {
-        codeLayout.style.visibility = 'hidden';
-        codeLayout.style.position = 'absolute';
-        codeLayout.classList.remove('hidden');
-      }
-
       _codeEditor = CodeMirror(editorWrap, {
         mode: cfg.cmMode,
         theme: 'material-darker',
         lineNumbers: true,
-        tabSize: 4,
+        tabSize: cfg.runner === 'python' ? 4 : 2,
         indentWithTabs: false,
         matchBrackets: true,
         autoCloseBrackets: true,
@@ -1849,12 +1916,6 @@ window.EditorApp = (function () {
       // 注册语言特定的关键词补全
       _registerCodeHints(_codeEditor, cfg.cmMode);
 
-      if (wasHidden) {
-        codeLayout.classList.add('hidden');
-        codeLayout.style.visibility = '';
-        codeLayout.style.position = '';
-      }
-
       // 延迟刷新确保正确渲染
       setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
     }
@@ -1863,7 +1924,7 @@ window.EditorApp = (function () {
     document.getElementById('code-save-btn')?.addEventListener('click', async () => {
       if (!_codeEditor || !EditorState.projectPath) return;
       const code = _codeEditor.getValue();
-      await window.api.writeFile(EditorState.projectPath + '/scripts/main.' + cfg.ext, code);
+      await window.api.writeFile(EditorState.projectPath + '/scripts/main.' + _codeCfg().ext, code);
       const statusText = document.getElementById('code-status');
       if (statusText) {
         statusText.textContent = '✓ 已保存';
@@ -1882,117 +1943,57 @@ window.EditorApp = (function () {
       }
     });
 
-    document.getElementById('code-run-btn')?.addEventListener('click', async () => {
+    document.getElementById('code-run-btn')?.addEventListener('click', () => {
       if (!_codeEditor) return;
-      const code = _codeEditor.getValue();
+      const cfg = _codeCfg();
       const outputWrap = document.getElementById('code-output-wrap');
       const outputEl = document.getElementById('code-output');
       const runBtn = document.getElementById('code-run-btn');
       const stopBtn = document.getElementById('code-stop-btn');
       const statusEl = document.getElementById('code-status');
-      const inputBar = document.getElementById('code-input-bar');
-      const stdinInput = document.getElementById('code-stdin-input');
-      const stdinSend = document.getElementById('code-stdin-send');
 
-      const langKey = cfg.cmMode === 'python' ? 'python' : (cfg.cmMode === 'javascript' ? 'javascript' : 'cpp');
-
-      // 显示输出面板，清空内容
+      // 显示输出面板, 清空内容
       outputWrap?.classList.remove('hidden');
       if (outputEl) outputEl.textContent = '';
+
+      // 逐行追加输出（解释器输出可能自带换行）
+      const appendLine = (text) => {
+        if (!outputEl) return;
+        outputEl.textContent += String(text).replace(/\n+$/, '') + '\n';
+        outputEl.scrollTop = outputEl.scrollHeight;
+      };
+
+      // 在渲染进程内启动代码运行时: 逐帧执行, 直接操作舞台角色
+      const ok = (typeof CodeRuntime !== 'undefined') && CodeRuntime.start(cfg.runner, () => _codeEditor ? _codeEditor.getValue() : '', {
+        onOutput: appendLine,
+        onFrame: () => _pushPanelSprites(), // 每帧把角色数据推送到舞台面板窗口
+        onStop: () => { // 运行时因错误自行停止时同步按钮状态
+          if (runBtn) runBtn.disabled = false;
+          if (stopBtn) stopBtn.disabled = true;
+          if (statusEl) statusEl.textContent = '❌ 出错终止';
+        },
+      });
+      if (!ok) {
+        appendLine('❌ 运行时启动失败: ' + cfg.label + ' 解释器不可用');
+        return;
+      }
       if (runBtn) runBtn.disabled = true;
       if (stopBtn) stopBtn.disabled = false;
       if (statusEl) statusEl.textContent = '运行中...';
-      // 显示 stdin 输入栏（Python/C++ 可能需要 input()）
-      inputBar?.classList.remove('hidden');
-
-      // 设置流式输出监听（必须在 runCode 之前注册）
-      if (window.api && window.api.onCodeOutput) {
-        window.api.onCodeOutput((text, type) => {
-          if (outputEl) {
-            outputEl.textContent += text;
-            // 自动滚动到底部
-            outputEl.scrollTop = outputEl.scrollHeight;
-          }
-        });
-        window.api.onCodeDone((exitCode) => {
-          if (runBtn) runBtn.disabled = false;
-          if (stopBtn) stopBtn.disabled = true;
-          if (statusEl) statusEl.textContent = exitCode === 0 ? '✓ 完成' : `退出码 ${exitCode}`;
-          if (outputEl) outputEl.textContent += `\n[进程结束, 退出码 ${exitCode}]`;
-          inputBar?.classList.add('hidden');
-          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
-        });
-      }
-
-      // stdin 发送函数
-      async function sendStdin() {
-        if (!stdinInput) return;
-        const text = stdinInput.value;
-        stdinInput.value = '';
-        if (outputEl) {
-          outputEl.textContent += text + '\n';
-          outputEl.scrollTop = outputEl.scrollHeight;
-        }
-        if (window.api && window.api.sendCodeStdin) {
-          await window.api.sendCodeStdin(text);
-        }
-      }
-      if (stdinSend) stdinSend.onclick = sendStdin;
-      if (stdinInput) stdinInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); sendStdin(); } };
-
-      try {
-        if (window.api && window.api.runCode) {
-          await window.api.runCode(langKey, code, EditorState.projectPath);
-        } else {
-          // Web 环境回退
-          if (langKey === 'javascript') {
-            if (outputEl) {
-              const origLog = console.log;
-              console.log = (...args) => {
-                outputEl.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') + '\n';
-                outputEl.scrollTop = outputEl.scrollHeight;
-                origLog(...args);
-              };
-              try {
-                new Function(code)();
-                outputEl.textContent += '[执行完成]\n';
-              } catch (e) {
-                outputEl.textContent += '❌ ' + e.message + '\n';
-              }
-              console.log = origLog;
-            }
-          } else {
-            if (outputEl) {
-              outputEl.textContent = `ℹ️ ${cfg.label} 代码只能在桌面版中运行。`;
-            }
-          }
-          if (runBtn) runBtn.disabled = false;
-          if (stopBtn) stopBtn.disabled = true;
-          inputBar?.classList.add('hidden');
-          if (statusEl) statusEl.textContent = '✓ 完成';
-          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
-        }
-      } catch (e) {
-        if (outputEl) outputEl.textContent += '❌ ' + e.message + '\n';
-        if (runBtn) runBtn.disabled = false;
-        if (stopBtn) stopBtn.disabled = true;
-        inputBar?.classList.add('hidden');
-        if (statusEl) statusEl.textContent = '❌ 错误';
-      }
     });
 
-    document.getElementById('code-stop-btn')?.addEventListener('click', async () => {
-      if (window.api && window.api.stopCode) {
-        await window.api.stopCode();
-      }
-      const outputEl = document.getElementById('code-output');
-      if (outputEl) outputEl.textContent += '\n[已停止]';
+    document.getElementById('code-stop-btn')?.addEventListener('click', () => {
+      if (typeof CodeRuntime !== 'undefined') CodeRuntime.stop();
       const runBtn = document.getElementById('code-run-btn');
       const stopBtn = document.getElementById('code-stop-btn');
-      const inputBar = document.getElementById('code-input-bar');
+      const statusEl = document.getElementById('code-status');
       if (runBtn) runBtn.disabled = false;
       if (stopBtn) stopBtn.disabled = true;
-      inputBar?.classList.add('hidden');
+      if (statusEl) statusEl.textContent = '✓ 已停止';
+      // 停止后推送一次最终舞台状态
+      _lastStageJSON = '';
+      _pushPanelSprites();
+      setTimeout(() => { const s = document.getElementById('code-status'); if (s && s.textContent === '✓ 已停止') s.textContent = ''; }, 3000);
     });
 
     // 加载已保存的代码
@@ -2011,7 +2012,7 @@ window.EditorApp = (function () {
     // 在状态栏显示当前语言
     const statusText = document.getElementById('status-text');
     if (statusText) {
-      statusText.textContent = `代码编程：${cfg.label}`;
+      statusText.textContent = `代码编程：${cfg.label}（舞台在舞台窗口运行）`;
     }
   }
 
@@ -3764,18 +3765,9 @@ window.EditorApp = (function () {
       console.log('[loadProject] 非 microbit 模式, projectMode:', EditorState.projectMode);
     }
 
-    // 代码编程模式：重新应用布局
+    // 代码编程模式：重新应用布局（initCodeMode 内部会调用 _applyCodeLayout 保留舞台）
     if (EditorState.projectMode && EditorState.projectMode.startsWith('code-')) {
       initCodeMode(EditorState.projectMode);
-      // 重新应用布局（确保隐藏其他布局）
-      document.getElementById('main-layout')?.classList.add('hidden');
-      document.getElementById('advanced-layout')?.classList.add('hidden');
-      document.getElementById('data-layout')?.classList.add('hidden');
-      document.getElementById('mc-layout')?.classList.add('hidden');
-      document.getElementById('toolbar')?.classList.add('hidden');
-      document.getElementById('palette-panel')?.classList.add('hidden');
-      document.getElementById('stage-panel')?.classList.add('hidden');
-      document.getElementById('code-layout')?.classList.remove('hidden');
       // 延迟刷新 CodeMirror
       setTimeout(() => {
         const editor = getCodeEditor();

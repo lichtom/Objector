@@ -13,6 +13,7 @@
   "files": [
     "src/**/*",
     "editor/**/*",
+    "interpreter/**/*",
     "icons/**/*",
     "docs/**/*",
     "sounds/**/*",
