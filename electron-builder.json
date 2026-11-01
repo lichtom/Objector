@@ -57,6 +57,7 @@
         "arch": ["x64"]
       }
     ],
+    "artifactName": "Objector-${version}-win.zip",
     "icon": "Objector2.ico",
     "forceCodeSigning": false
   },
@@ -80,6 +81,7 @@
         "arch": ["x64"]
       }
     ],
+    "artifactName": "objector-${version}.${ext}",
     "icon": "Objector2.png",
     "category": "Development"
   }
