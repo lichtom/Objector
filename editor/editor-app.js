@@ -107,7 +107,7 @@ window.EditorApp = (function () {
       if (EditorState.projectPath && result.id) {
         const extDir = EditorState.projectPath + '/extensions';
         await window.api.ensureDir(extDir);
-        const ext = filePath.endsWith('.js') ? '.js' : '.json';
+        const ext = filePath.endsWith('.js') ? '.js' : (filePath.endsWith('.py') ? '.py' : '.json');
         const content = await window.api.readFile(filePath);
         if (content) {
           await window.api.writeFile(extDir + '/' + result.id + ext, content);
@@ -902,8 +902,8 @@ window.EditorApp = (function () {
 
           if (!currentExtFileContent) {
             const noFileMsg = i18n.isEnglish()
-              ? 'No extension files found in extensions/ directory. Please create and save at least one .json or .js file.'
-              : '未找到扩展文件。请在 extensions/ 目录下新建并保存至少一个 .json 或 .js 文件。';
+              ? 'No extension files found in extensions/ directory. Please create and save at least one .json / .js / .py file.'
+              : '未找到扩展文件。请在 extensions/ 目录下新建并保存至少一个 .json / .js / .py 文件。';
             alert(noFileMsg);
             document.getElementById('status-text').textContent = i18n.t('status.ready');
             return;
@@ -1753,6 +1753,25 @@ window.EditorApp = (function () {
     ];
     const words = (keywords[cmMode] || keywords['javascript']).concat(GAME_API_WORDS.filter(w => !(keywords[cmMode] || []).includes(w)));
 
+    // 已安装扩展的 code_exp API（每次补全时动态读取, 新装扩展无需重新注册）
+    // JS/Python: h.hello → 补全 h 与 hello; ALB: h_hello
+    function _extApiWords() {
+      const out = [];
+      if (typeof ExtensionManager === 'undefined' || !ExtensionManager.getCodeExpApis) return out;
+      try {
+        ExtensionManager.getCodeExpApis().forEach(ext => {
+          out.push(ext.objName);
+          Object.keys(ext.fns).forEach(k => {
+            const ce = ext.fns[k].def.code_exp || {};
+            if (cmMode === 'text/x-alb') { if (ce.ALB) out.push(ext.objName + '_' + ce.ALB); }
+            else if (cmMode === 'python') { if (ce.python) out.push(ce.python); }
+            else { if (ce.JavaScript) out.push(ce.JavaScript); }
+          });
+        });
+      } catch (e) { /* ignore */ }
+      return out.filter(w => w && !words.includes(w));
+    }
+
     // 自定义 hint 函数
     function wordHint(cm) {
       const cur = cm.getCursor();
@@ -1763,7 +1782,7 @@ window.EditorApp = (function () {
 
       if (!word || word.length < 1) return null;
 
-      const list = words.filter(w => w.startsWith(word) && w !== word);
+      const list = words.concat(_extApiWords()).filter(w => w.startsWith(word) && w !== word);
 
       // 也从当前文档提取标识符
       const docText = cm.getValue();
@@ -1784,9 +1803,10 @@ window.EditorApp = (function () {
     // 注册到 CodeMirror
     CodeMirror.registerHelper('hint', cmMode.includes('python') ? 'python' : 'javascript-custom', wordHint);
 
-    // 输入时自动弹出补全（防抖 300ms）
+    // 输入时自动弹出补全（防抖 300ms）; 重复注册（切换语言）时先移除旧监听, 避免叠加
     let debounceTimer = null;
-    editor.on('inputRead', (cm, change) => {
+    if (editor._codeHintHandler) editor.off('inputRead', editor._codeHintHandler);
+    const inputReadHandler = (cm, change) => {
       if (change.text[0] && /^[a-zA-Z_]$/.test(change.text[0])) {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
@@ -1797,7 +1817,313 @@ window.EditorApp = (function () {
           }
         }, 300);
       }
+    };
+    editor.on('inputRead', inputReadHandler);
+    editor._codeHintHandler = inputReadHandler;
+  }
+
+  /** 代码编程模式: 每个角色独立存储代码（角色名 -> { python, javascript, alb }） */
+  let _codeScripts = {};
+  /** 当前代码语言配置键（'code-python' | 'code-js' | 'code-alb'）
+   *  注意: 不能依赖 EditorState.projectMode —— initCodeMode 在 loadProject 之前被调用时它还没赋值 */
+  let _codeLangKey = 'code-python';
+  /** 落盘闸门: 磁盘角色代码恢复完成前禁止 _persistCodeScripts 回写。
+   *  否则项目加载时 restoreSprites 触发的角色切换回调会用示例模板覆盖 config.codeScripts（"保存后再加载退回示例"的根因） */
+  let _codeScriptsRestored = false;
+
+  /** 是否为代码编程模式项目（兼容旧的裸 'code' 值） */
+  function _isCodeProjectMode() {
+    const m = String(EditorState.projectMode || '');
+    return m === 'code' || m.indexOf('code-') === 0;
+  }
+
+  /** 把 project.json 里的 mode 归一化为 CODE_LANG_CONFIG 键 */
+  function _normalizeCodeModeKey(mode) {
+    const m = String(mode || '');
+    if (CODE_LANG_CONFIG[m]) return m;
+    if (m === 'code-javascript' || m === 'js' || m === 'javascript' || m === 'code-js') return 'code-js';
+    if (m === 'py' || m === 'python' || m === 'code-py') return 'code-python';
+    if (m === 'alb' || m === 'code-alb') return 'code-alb';
+    return '';
+  }
+
+  /** runner 名 -> 语言配置项 */
+  function _cfgForRunner(runner) {
+    const key = _normalizeCodeModeKey(runner);
+    return CODE_LANG_CONFIG[key] || CODE_LANG_CONFIG[_codeLangKey] || CODE_LANG_CONFIG['code-python'];
+  }
+
+  /** 文本是否正好是某个语言的示例模板（未编辑过的初始代码） */
+  function _isTemplateText(runner, text) {
+    if (typeof text !== 'string') return false;
+    return Object.keys(CODE_LANG_CONFIG).some(k =>
+      (!runner || CODE_LANG_CONFIG[k].runner === runner) && text === CODE_LANG_CONFIG[k].template);
+  }
+
+  /** 编辑器里当前显示的是哪个角色的代码（切换回调时活动角色已指向新角色, 不能用它写回） */
+  let _codeEditorOwner = '';
+  /** 当前活动角色名（代码存储 key） */
+  function _activeCodeKey() {
+    if (typeof StageManager === 'undefined') return '';
+    const s = StageManager.getActiveSprite();
+    return s ? String(s.name) : '';
+  }
+
+  /** 角色切换时保存/加载对应代码（只在编辑器状态触发, 运行期间 CodeRuntime 绑定角色） */
+  function _onCodeSpriteSelected() {
+    if (!_isCodeProjectMode()) return;
+    if (typeof CodeRuntime !== 'undefined' && CodeRuntime.isRunning && CodeRuntime.isRunning()) return;
+    _syncAllSpriteCode();     // 先把上个角色的编辑写回它自己（_codeEditorOwner）
+    const name = _activeCodeKey();
+    if (!name) return;
+    const cur = (typeof StageManager !== 'undefined' && StageManager.getActiveSprite) ? StageManager.getActiveSprite() : null;
+    if (cur && cur.isStage) return;        // 舞台不承载代码: 不播种/不切编辑器归属, 避免生成无意义的"舞台"条目
+    _ensureSpriteCodeLoaded(name);
+    _applySpriteCodeToEditor(name);
+    if (_codeScriptsRestored) _persistCodeScripts(); // 切换角色时自动落盘（闸门打开后）
+  }
+
+  /** 把编辑器当前内容写回它所属角色的存储条目 */
+  function _syncCurrentCode() {
+    if (!_codeEditor) return;
+    const name = _codeEditorOwner || _activeCodeKey();
+    const runner = _codeCfg().runner;
+    if (!name || !runner) return;
+    if (!_codeEditorOwner) {
+      // 尚无明确归属时活动角色是舞台 → 不回写（舞台不承载代码）
+      const cur = (typeof StageManager !== 'undefined' && StageManager.getActiveSprite) ? StageManager.getActiveSprite() : null;
+      if (cur && cur.isStage) return;
+    }
+    if (!_codeScripts[name]) _codeScripts[name] = {};
+    const val = _codeEditor.getValue();
+    const prev = _codeScripts[name][runner];
+    // 保护: 编辑器仍停留在"未修改的示例模板", 而该角色已存有真实代码时不覆盖
+    // （加载项目 / 切换语言的时序差异会让模板短暂占据编辑器, 直接写回会丢代码）
+    if (prev != null && prev !== val && _isTemplateText(runner, val)) return;
+    _codeScripts[name][runner] = val;
+  }
+
+  /** 补齐所有角色的代码条目, 并把编辑器内容写回所属角色（保存/运行/切角色前调用） */
+  function _syncAllSpriteCode() {
+    if (!_codeEditor) return;
+    if (typeof StageManager === 'undefined') return;
+    const runner = _codeCfg().runner;
+    const sprites = StageManager.getSprites() || [];
+    for (const s of sprites) {
+      if (s.isStage) continue;
+      const name = String(s.name);
+      if (!_codeScripts[name] || _codeScripts[name][runner] == null) _seedSpriteCode(name, runner);
+    }
+    _syncCurrentCode();
+  }
+
+  /** 初始化角色代码条目: 旧项目迁移 scripts/main.<ext> → 只给第一个非舞台角色; 否则用模板 */
+  function _seedSpriteCode(name, runner) {
+    if (_codeScripts[name] && _codeScripts[name][runner] != null) return;
+    const cfg = _cfgForRunner(runner);
+    if (!_codeScripts[name]) _codeScripts[name] = {};
+    _codeScripts[name][runner] = cfg.template;
+    if (!EditorState.projectPath) return;
+    const firstIdx = (StageManager.getSprites() || []).findIndex(s => !s.isStage);
+    const curIdx = StageManager.getActiveSpriteIdx();
+    if (curIdx !== firstIdx) return;
+    const ext = cfg.ext;
+    window.api.readFile(EditorState.projectPath + '/scripts/main.' + ext).then(legacy => {
+      if (legacy && String(legacy).trim() && _codeScripts[name] && _codeScripts[name][runner] === cfg.template) {
+        _codeScripts[name][runner] = legacy;
+        if (name === (_codeEditorOwner || _activeCodeKey()) && runner === _codeCfg().runner && _codeEditor && _codeEditor.getValue() === cfg.template) {
+          _codeApplying = true;
+          try { _codeEditor.setValue(legacy); } finally { _codeApplying = false; }
+        }
+      }
+    }).catch(() => {});
+  }
+
+  /** 确保角色代码条目存在（含旧版单文件异步迁移） */
+  function _ensureSpriteCodeLoaded(name) {
+    _seedSpriteCode(name, _codeCfg().runner);
+  }
+
+  /** 把某角色某语言的代码载入编辑器 */
+  let _codeApplying = false;
+  function _applySpriteCodeToEditor(name) {
+    if (!_codeEditor) return;
+    const runner = _codeCfg().runner;
+    const cfg = _codeCfg();
+    const code = (_codeScripts[name] && _codeScripts[name][runner] != null) ? _codeScripts[name][runner] : cfg.template;
+    if (_codeEditor.getValue() !== code) {
+      _codeApplying = true;                 // 程序载入不算用户编辑, 不标脏/不回写
+      try { _codeEditor.setValue(code); } finally { _codeApplying = false; }
+    }
+    _codeEditorOwner = name;                // 从此刻起编辑器属于该角色
+    setTimeout(() => { if (_codeEditor) _codeEditor.refresh(); }, 100);
+  }
+
+  /** 获取所有角色的代码（用于项目保存: config.codeScripts） */
+  function getAllCodeScripts() {
+    _syncCurrentCode();
+    const out = {};
+    Object.keys(_codeScripts).forEach(k => { out[k] = { ..._codeScripts[k] }; });
+    return out;
+  }
+
+  /** 批量设置角色代码（项目加载时恢复） */
+  function setAllCodeScripts(scripts) {
+    _codeScripts = scripts || {};
+    // 清洗脏数据: 旧版本曾因语言误判把 A 语言的示例模板存进 B 语言的键,
+    // 加载时把"内容其实是某语言未修改模板"的条目归位为该语言自己的模板
+    Object.keys(_codeScripts).forEach(name => {
+      const entry = _codeScripts[name] || {};
+      Object.keys(entry).forEach(runner => {
+        const own = _cfgForRunner(runner);
+        if (!own || entry[runner] === own.template) return;
+        if (_isTemplateText(null, entry[runner])) entry[runner] = own.template;
+      });
     });
+  }
+
+  /** 代码模式运行: 为每个角色构建代码源（编辑器里的内容已写回存储, 统一按角色读取） */
+  function getSpriteCodeSources() {
+    _syncAllSpriteCode();
+    const runner = _codeCfg().runner;
+    const entries = [];
+    const sprites = (typeof StageManager !== 'undefined') ? (StageManager.getSprites() || []) : [];
+    sprites.forEach((s, i) => {
+      if (s.isStage) return;
+      const name = String(s.name);
+      entries.push({
+        name,
+        idx: i,
+        getCode: () => (_codeScripts[name] && _codeScripts[name][runner]) || '',
+      });
+    });
+    return entries;
+  }
+
+  /** 角色名 → 安全文件名（替换 Windows/Linux 非法字符, 加载时按同样规则反查匹配） */
+  function _safeCodeFileName(name) {
+    const s = String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '');
+    return s || 'sprite';
+  }
+
+  const _RUNNER_EXT = { python: 'py', javascript: 'js', alb: 'alb' };
+
+  /**
+   * 把所有角色的代码落盘（返回是否成功）:
+   *  ① 每个角色独立文件 code/<角色名>.<py|js|alb> —— 可外部编辑, 单文件写入互不干扰
+   *  ② project.json 的 config.codeScripts —— 兼容导出/旧加载链路
+   */
+  async function _persistCodeScripts() {
+    if (!EditorState.projectPath || !_isCodeProjectMode()) return false;
+    if (!_codeScriptsRestored) return false; // 磁盘代码尚未恢复, 禁止回写（防模板覆盖用户代码）
+    try {
+      const all = getAllCodeScripts();
+      // 1) 每角色独立代码文件
+      const codeDir = EditorState.projectPath + '/code';
+      if (window.api.ensureDir) await window.api.ensureDir(codeDir);
+      const writes = [];
+      Object.keys(all).forEach(name => {
+        if (name === '舞台') return;        // 舞台不承载代码
+        const entry = all[name] || {};
+        Object.keys(entry).forEach(runner => {
+          const ext = _RUNNER_EXT[runner];
+          if (!ext || entry[runner] == null) return;
+          writes.push(window.api.writeFile(codeDir + '/' + _safeCodeFileName(name) + '.' + ext, String(entry[runner])));
+        });
+      });
+      // 2) project.json（保留其它字段, 仅更新 codeScripts/codeLang）
+      const p = EditorState.projectPath + '/project.json';
+      const cfgStr = await window.api.readFile(p);
+      const config = cfgStr ? JSON.parse(cfgStr) : {};
+      config.codeScripts = all;
+      config.codeLang = _codeCfg().runner; // 记录语言, 兼容 mode 为裸 'code' 的项目
+      writes.push(window.api.writeFile(p, JSON.stringify(config, null, 2)));
+      const results = await Promise.all(writes);
+      const failed = results.find(r => r && r.error);   // write-file 失败时返回 {error} 而不抛异常
+      if (failed) { console.warn('[代码编程模式] 写入失败:', failed.error); return false; }
+      return true;
+    } catch (e) {
+      console.warn('[代码编程模式] 写入代码失败:', e);
+      return false;
+    }
+  }
+
+  /**
+   * 在精灵恢复(会触发角色切换回调)之前, 从磁盘恢复按角色代码并打开落盘闸门:
+   * project.json 的 config.codeScripts → 再叠加 code/ 独立文件（文件是逐次自动保存的最新内容, 优先）
+   */
+  async function _restoreCodeScriptsFromDisk(config, folder) {
+    try {
+      if (config && config.codeScripts && typeof config.codeScripts === 'object') setAllCodeScripts(config.codeScripts);
+      // 收集角色名（来自 project.json 的 sprites + 已有存储键）
+      const names = [];
+      (Array.isArray(config && config.sprites) ? config.sprites : []).forEach(s => {
+        const n = String((s && s.name) || '');
+        if (n && n !== '舞台' && names.indexOf(n) < 0) names.push(n);
+      });
+      Object.keys(_codeScripts).forEach(k => { if (k !== '舞台' && names.indexOf(k) < 0) names.push(k); });
+      // 叠加 code/ 独立文件
+      if (window.api.listDir) {
+        const codeDir = folder + '/code';
+        const files = await window.api.listDir(codeDir);
+        const extToRunner = { py: 'python', js: 'javascript', alb: 'alb' };
+        for (const f of files || []) {
+          const dot = f.lastIndexOf('.');
+          if (dot <= 0) continue;
+          const runner = extToRunner[f.slice(dot + 1).toLowerCase()];
+          if (!runner) continue;
+          const base = f.slice(0, dot);
+          const name = names.find(n => _safeCodeFileName(n) === base);
+          if (!name) continue;
+          const content = await window.api.readFile(codeDir + '/' + f);
+          if (content == null) continue;
+          if (!_codeScripts[name]) _codeScripts[name] = {};
+          _codeScripts[name][runner] = String(content);
+        }
+      }
+    } catch (e) {
+      console.warn('[代码编程模式] 恢复角色代码失败:', e);
+    } finally {
+      _codeScriptsRestored = true; // 无论成败都打开闸门, 否则用户将永远存不了盘
+    }
+  }
+
+  /** 当前代码语言 runner 名（python | javascript | alb）, 供项目保存时写入 config.codeLang */
+  function getCodeLangRunner() {
+    return _codeCfg().runner;
+  }
+
+  /** 磁盘角色代码是否已恢复完成（供 ProjectManager 全量保存前判断, 防止加载中途用模板覆盖 codeScripts） */
+  function isCodeScriptsRestored() {
+    return _codeScriptsRestored;
+  }
+
+  /** 取当前语言下积木对应的代码片段（内置 API + 扩展 code_exp, 供拖拽转代码） */
+  function getBlockCodeSnippet(blockType) {
+    if (typeof CodeModeBlocks === 'undefined') return null;
+    return CodeModeBlocks.toCode(blockType, _codeCfg().runner);
+  }
+
+  /** 把拖入代码框的积木转换为当前语言代码并插入光标处 */
+  function insertBlockAsCode(blockType) {
+    if (!_codeEditor) return;
+    const lines = getBlockCodeSnippet(blockType);
+    if (!lines || !lines.length) return;
+    _syncCurrentCode();
+    const text = lines.join('\n');
+    _codeEditor.focus();
+    const cur = _codeEditor.getCursor();
+    // 已有内容时在下方新起行插入（不覆盖现有代码）
+    const atLineEnd = { line: cur.line, ch: _codeEditor.getLine(cur.line).length };
+    const prefix = (_codeEditor.getValue() && _codeEditor.getValue().trim()) ? '\n' : '';
+    _codeEditor.replaceRange(prefix + text + '\n', atLineEnd);
+    _codeEditor.setCursor({ line: atLineEnd.line + prefix.split('\n').length - 1 + lines.length, ch: 0 });
+    EditorState._isDirty = true;
+    const statusEl = document.getElementById('code-status');
+    if (statusEl) {
+      statusEl.textContent = '已插入代码';
+      setTimeout(() => { if (statusEl && statusEl.textContent === '已插入代码') statusEl.textContent = ''; }, 1500);
+    }
   }
 
   /** 代码编程模式语言配置: 用代码编写 Objector 游戏（渲染进程内解释执行, 保留舞台） */
@@ -1844,12 +2170,12 @@ window.EditorApp = (function () {
     },
   };
 
-  /** 取当前项目模式的语音配置（动态读取, 切换项目后依然正确） */
+  /** 取当前代码语言配置（由 initCodeMode 显式设定, 不依赖 projectMode 的赋值时机） */
   function _codeCfg() {
-    return CODE_LANG_CONFIG[EditorState.projectMode] || CODE_LANG_CONFIG['code-python'];
+    return CODE_LANG_CONFIG[_codeLangKey] || CODE_LANG_CONFIG['code-python'];
   }
 
-  /** 代码模式布局: 保留右侧角色/音频栏与舞台面板窗口, 中间积木编辑区替换为代码编辑器 */
+  /** 代码模式布局: 保留左侧积木栏（拖积木转代码）与右侧角色/音频栏, 中间积木编辑区替换为代码编辑器 */
   function _applyCodeLayout() {
     const mainLayout = document.getElementById('main-layout');
     const codeLayout = document.getElementById('code-layout');
@@ -1861,7 +2187,8 @@ window.EditorApp = (function () {
     document.getElementById('mc-layout')?.classList.add('hidden');
     // 主布局保持显示（保留右侧角色/音频栏, 即"保留舞台等"）
     mainLayout.classList.remove('hidden');
-    document.getElementById('palette-panel')?.classList.add('hidden');
+    // 积木栏保留: 拖积木到代码框时自动转换为对应语言的代码
+    document.getElementById('palette-panel')?.classList.remove('hidden');
     document.getElementById('editor-panel')?.classList.add('hidden');
     document.getElementById('toolbar')?.classList.add('hidden');
     // 将代码编辑区插入 main-layout 中间位置
@@ -1872,8 +2199,10 @@ window.EditorApp = (function () {
     _initPanels();
   }
 
-  function initCodeMode(mode) {
-    const cfg = CODE_LANG_CONFIG[mode] || CODE_LANG_CONFIG['code-python'];
+  function initCodeMode(mode, opts) {
+    // 先确定语言键: mode 可能是 'code-alb' / 'code-javascript' / 'alb' / 裸 'code'（旧项目）
+    _codeLangKey = _normalizeCodeModeKey(mode) || _normalizeCodeModeKey(EditorState.projectMode) || _codeLangKey;
+    const cfg = CODE_LANG_CONFIG[_codeLangKey] || CODE_LANG_CONFIG['code-python'];
     _applyCodeLayout();
     console.log(`[代码编程模式] ${cfg.label} (游戏代码编辑, 保留舞台)`);
 
@@ -1882,20 +2211,29 @@ window.EditorApp = (function () {
     if (langLabel) langLabel.textContent = cfg.label;
 
     if (_codeModeInitialized) {
-      // 已初始化: 仅切换编辑器语言模式并重新加载对应代码文件
+      // 已初始化: 切换语言前先把编辑器内容写回旧语言存储, 再载入当前角色新语言代码
+      // opts.restore: 项目刚加载完, 存储中已是磁盘上的真实代码, 不能反向用编辑器内容覆盖
+      if (!opts || !opts.restore) _syncCurrentCode();
       if (_codeEditor) {
         try { _codeEditor.setOption('mode', cfg.cmMode); } catch (e) { /* ignore */ }
-        _loadCodeFile(cfg.ext).then(code => {
-          if (_codeEditor) {
-            _codeEditor.setValue(code || cfg.template);
-            setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
-          }
-        });
+        try { _codeEditor.setOption('tabSize', cfg.runner === 'python' ? 4 : 2); } catch (e) { /* ignore */ }
+        _registerCodeHints(_codeEditor, cfg.cmMode);
+        _ensureSpriteCodeLoaded(_activeCodeKey());
+        if (_codeEditor) {
+          _applySpriteCodeToEditor(_activeCodeKey());
+          setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
+        }
+        _persistCodeScripts(); // 切语言时自动落盘
       }
       setTimeout(() => { if (_codeEditor) _codeEditor.refresh(); }, 200);
       return;
     }
     _codeModeInitialized = true;
+
+    // 角色切换时保存/加载对应角色的代码
+    if (typeof StageManager !== 'undefined' && StageManager.onActiveSpriteChange) {
+      StageManager.onActiveSpriteChange(_onCodeSpriteSelected);
+    }
 
     // 初始化 CodeMirror
     const editorWrap = document.getElementById('code-editor-wrap');
@@ -1916,21 +2254,32 @@ window.EditorApp = (function () {
       // 注册语言特定的关键词补全
       _registerCodeHints(_codeEditor, cfg.cmMode);
 
+      // 编辑即同步: 标脏 + 防抖自动回写 config.codeScripts（避免忘记保存/切角色丢代码）
+      let _codeSaveTimer = null;
+      _codeEditor.on('change', () => {
+        if (_codeApplying) return;
+        _syncCurrentCode();
+        EditorState._isDirty = true;
+        clearTimeout(_codeSaveTimer);
+        _codeSaveTimer = setTimeout(() => { _syncAllSpriteCode(); _persistCodeScripts(); }, 1200);
+      });
+
       // 延迟刷新确保正确渲染
       setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
     }
 
-    // 绑定工具栏按钮
+    // 保存: 代码按角色存入内存, 并立即写入 code/<角色>.<ext> 独立文件 + project.json 的 config.codeScripts
     document.getElementById('code-save-btn')?.addEventListener('click', async () => {
-      if (!_codeEditor || !EditorState.projectPath) return;
-      const code = _codeEditor.getValue();
-      await window.api.writeFile(EditorState.projectPath + '/scripts/main.' + _codeCfg().ext, code);
+      if (!_codeEditor) return;
+      _syncAllSpriteCode();
+      EditorState._isDirty = true; // 标记未保存, 项目保存(Ctrl+S)时一并持久化
+      const ok = await _persistCodeScripts();
       const statusText = document.getElementById('code-status');
       if (statusText) {
-        statusText.textContent = '✓ 已保存';
+        statusText.textContent = ok ? '✓ 已保存' : '✗ 保存失败';
         setTimeout(() => { statusText.textContent = ''; }, 2000);
       }
-      document.getElementById('status-text').textContent = '代码已保存';
+      document.getElementById('status-text').textContent = ok ? '代码已保存' : '代码保存失败（详见控制台）';
       setTimeout(() => {
         document.getElementById('status-text').textContent = i18n.t('status.ready');
       }, 2000);
@@ -1963,8 +2312,10 @@ window.EditorApp = (function () {
         outputEl.scrollTop = outputEl.scrollHeight;
       };
 
-      // 在渲染进程内启动代码运行时: 逐帧执行, 直接操作舞台角色
-      const ok = (typeof CodeRuntime !== 'undefined') && CodeRuntime.start(cfg.runner, () => _codeEditor ? _codeEditor.getValue() : '', {
+      // 在渲染进程内启动代码运行时: 每个角色逐帧执行各自的代码, 线程绑定角色上下文
+      const sources = getSpriteCodeSources();
+      _persistCodeScripts(); // 运行前落盘, 避免忘记保存
+      const ok = (typeof CodeRuntime !== 'undefined') && CodeRuntime.start(cfg.runner, sources, {
         onOutput: appendLine,
         onFrame: () => _pushPanelSprites(), // 每帧把角色数据推送到舞台面板窗口
         onStop: () => { // 运行时因错误自行停止时同步按钮状态
@@ -1996,13 +2347,9 @@ window.EditorApp = (function () {
       setTimeout(() => { const s = document.getElementById('code-status'); if (s && s.textContent === '✓ 已停止') s.textContent = ''; }, 3000);
     });
 
-    // 加载已保存的代码
-    _loadCodeFile(cfg.ext).then(code => {
-      if (code && _codeEditor) {
-        _codeEditor.setValue(code);
-        setTimeout(() => _codeEditor && _codeEditor.refresh(), 100);
-      }
-    });
+    // 载入当前角色的代码（未保存过的角色先做旧版单文件迁移）
+    _ensureSpriteCodeLoaded(_activeCodeKey());
+    _applySpriteCodeToEditor(_activeCodeKey());
 
     // 窗口大小改变时刷新
     window.addEventListener('resize', () => {
@@ -2199,7 +2546,7 @@ window.EditorApp = (function () {
     // microbit 硬件模式初始化（在 loadProject 之后执行，因为 projectMode 在 loadProject 中设置）
 
     // 代码编程模式初始化
-    if (projectMode && projectMode.startsWith('code-')) {
+    if (projectMode && String(projectMode).indexOf('code') === 0) {
       initCodeMode(projectMode);
     }
 
@@ -3500,6 +3847,12 @@ window.EditorApp = (function () {
     EditorState.projectMode = config.mode || mode || 'normal';
     document.getElementById('project-name').textContent = EditorState.projectName;
 
+    // 代码编程模式: 必须在 restoreSprites 触发角色切换回调之前恢复磁盘代码并打开落盘闸门,
+    // 否则回调会用示例模板覆盖 project.json 里的用户代码（"保存后再加载退回示例"的根因）
+    if (String(EditorState.projectMode).indexOf('code') === 0) {
+      await _restoreCodeScriptsFromDisk(config, folder);
+    }
+
     // 检查项目渲染模式，如需切换到 3D
     if (config.renderMode === '3d' && (typeof Stage3D === 'undefined' || !Stage3D.isInitialized || !Stage3D.isInitialized())) {
       console.log('[loadProject] 项目为 3D 模式，切换舞台到 3D...');
@@ -3562,12 +3915,15 @@ window.EditorApp = (function () {
 
     document.getElementById('status-text').textContent = i18n.t('status.loaded', null).replace('{name}', EditorState.projectName);
 
-    // 扩展模式：显示文件标签页
+    // 扩展模式：显示文件面板（新建/保存/加载测试 + 代码编辑区, 支持 .json / .js / .py）
     if (EditorState.projectMode === 'extension') {
       document.getElementById('stage-panel').classList.add('extension-mode');
       const filesEl = document.getElementById('files-content');
-      if (filesEl) filesEl.classList.remove('hidden');
-      FileEditor.refreshFileList();
+      if (filesEl) {
+        filesEl.classList.remove('hidden');
+        filesEl.style.display = 'flex';   // 同时清掉行内 display:none, 否则面板仍不可见
+      }
+      if (typeof FileEditor !== 'undefined') FileEditor.refreshFileList();
     }
 
     // 高级模式：激活 Godot 式布局并加载数据
@@ -3765,9 +4121,14 @@ window.EditorApp = (function () {
       console.log('[loadProject] 非 microbit 模式, projectMode:', EditorState.projectMode);
     }
 
-    // 代码编程模式：重新应用布局（initCodeMode 内部会调用 _applyCodeLayout 保留舞台）
-    if (EditorState.projectMode && EditorState.projectMode.startsWith('code-')) {
-      initCodeMode(EditorState.projectMode);
+    // 代码编程模式: 角色代码已在精灵加载前恢复（_restoreCodeScriptsFromDisk）, 这里只做语言归一与布局重应用
+    if (EditorState.projectMode && String(EditorState.projectMode).indexOf('code') === 0) {
+      let _codeModeArg = EditorState.projectMode;
+      // mode 为裸 'code' 的旧项目: 用保存的 codeLang 确定语言
+      if (config.codeLang && _normalizeCodeModeKey(_codeModeArg) === '') _codeModeArg = 'code-' + config.codeLang;
+      // restore: 以磁盘上的代码为准, 不用编辑器里的示例模板反向覆盖存储
+      initCodeMode(_codeModeArg, { restore: true });
+      await _persistCodeScripts(); // 恢复后立即回写一次, 顺带生成 code/ 下的每角色独立文件
       // 延迟刷新 CodeMirror
       setTimeout(() => {
         const editor = getCodeEditor();
@@ -4025,6 +4386,13 @@ window.EditorApp = (function () {
     setSpriteScript,
     getAllSpriteScripts,
     setAllSpriteScripts,
+    getAllCodeScripts,
+    setAllCodeScripts,
+    getCodeLangRunner,
+    isCodeScriptsRestored,
+    getSpriteCodeSources,
+    getBlockCodeSnippet,
+    insertBlockAsCode,
     getNodeScript,
     setNodeScript,
     setEditorSpriteIdx,

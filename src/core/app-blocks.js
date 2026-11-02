@@ -56,6 +56,7 @@
   BlockRegistry.register({
     type: 'app_set_prop', category: 'app-ui', color: CU,
     label: '设置 {component} 的 {prop} {op} {value}',
+    labels: { en: "Set {prop} of {component} {op} {value}" },
     labelKey: 'blocks.appUI.set_prop', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
@@ -70,6 +71,7 @@
   BlockRegistry.register({
     type: 'app_get_prop', category: 'app-ui', color: CU,
     label: '{component} 的 {prop}',
+    labels: { en: "{prop} of {component}" },
     labelKey: 'blocks.appUI.get_prop', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [
@@ -146,13 +148,17 @@
   });
   BlockRegistry.register({
     type: 'app_switch_window', category: 'app-window', color: CW,
-    label: '切换到窗口 {name}', labelKey: 'blocks.appWindow.switch_window', shape: 'stack',
+    label: '切换到窗口 {name}',
+    labels: { en: "Switch to window {name}" },
+    labelKey: 'blocks.appWindow.switch_window', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'name', type: 'string', default: '新窗口' }],
   });
   BlockRegistry.register({
     type: 'app_close_current_window', category: 'app-window', color: CW,
-    label: '关闭当前窗口', labelKey: 'blocks.appWindow.close_current', shape: 'stack',
+    label: '关闭当前窗口',
+    labels: { en: "Close current window" },
+    labelKey: 'blocks.appWindow.close_current', shape: 'stack',
     ports: { flowIn: true, flowOut: true }, params: [],
   });
 
@@ -265,25 +271,33 @@
 
   BlockRegistry.register({
     type: 'app_cli_print', category: 'app-cli', color: CLI,
-    label: '打印 {text}', labelKey: 'blocks.appCli.print', shape: 'stack',
+    label: '打印 {text}',
+    labels: { en: "Print {text}" },
+    labelKey: 'blocks.appCli.print', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'text', type: 'string', default: 'Hello' }],
   });
   BlockRegistry.register({
     type: 'app_cli_printline', category: 'app-cli', color: CLI,
-    label: '打印并换行 {text}', labelKey: 'blocks.appCli.printline', shape: 'stack',
+    label: '打印并换行 {text}',
+    labels: { en: "Print with newline {text}" },
+    labelKey: 'blocks.appCli.printline', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'text', type: 'string', default: 'Hello' }],
   });
   BlockRegistry.register({
     type: 'app_cli_input', category: 'app-cli', color: CLI,
-    label: '读取用户输入 {prompt}', labelKey: 'blocks.appCli.input', shape: 'reporter',
+    label: '读取用户输入 {prompt}',
+    labels: { en: "Read user input {prompt}" },
+    labelKey: 'blocks.appCli.input', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'prompt', type: 'string', default: '> ' }],
   });
   BlockRegistry.register({
     type: 'app_cli_clear', category: 'app-cli', color: CLI,
-    label: '清屏', labelKey: 'blocks.appCli.clear', shape: 'stack',
+    label: '清屏',
+    labels: { en: "Clear screen" },
+    labelKey: 'blocks.appCli.clear', shape: 'stack',
     ports: { flowIn: true, flowOut: true }, params: [],
   });
 
@@ -348,7 +362,9 @@
 
   BlockRegistry.register({
     type: 'app_set_html', category: 'app-html', color: CH,
-    label: '设置 {component} 的 HTML 内容为 {html}', labelKey: 'blocks.appHtml.set_html', shape: 'stack',
+    label: '设置 {component} 的 HTML 内容为 {html}',
+    labels: { en: "Set HTML of {component} to {html}" },
+    labelKey: 'blocks.appHtml.set_html', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: 'HTML' },
@@ -357,7 +373,9 @@
   });
   BlockRegistry.register({
     type: 'app_get_html', category: 'app-html', color: CH,
-    label: '{component} 的 HTML 内容', labelKey: 'blocks.appHtml.get_html', shape: 'reporter',
+    label: '{component} 的 HTML 内容',
+    labels: { en: "HTML content of {component}" },
+    labelKey: 'blocks.appHtml.get_html', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'component', type: 'string', default: 'HTML' }],
   });
@@ -369,7 +387,9 @@
   BlockRegistry.separator('app-canvas');
   BlockRegistry.register({
     type: 'app_canvas_line', category: 'app-canvas', color: CV,
-    label: '在 {component} 画线 从 ({x1},{y1}) 到 ({x2},{y2})', labelKey: 'blocks.appCanvas.line', shape: 'stack',
+    label: '在 {component} 画线 从 ({x1},{y1}) 到 ({x2},{y2})',
+    labels: { en: "Draw line on {component} from ({x1},{y1}) to ({x2},{y2})" },
+    labelKey: 'blocks.appCanvas.line', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -379,7 +399,9 @@
   });
   BlockRegistry.register({
     type: 'app_canvas_rect', category: 'app-canvas', color: CV,
-    label: '在 {component} 画矩形 ({x},{y}) 宽:{w} 高:{h}', labelKey: 'blocks.appCanvas.rect', shape: 'stack',
+    label: '在 {component} 画矩形 ({x},{y}) 宽:{w} 高:{h}',
+    labels: { en: "Draw rect on {component} at ({x},{y}) w:{w} h:{h}" },
+    labelKey: 'blocks.appCanvas.rect', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -389,7 +411,9 @@
   });
   BlockRegistry.register({
     type: 'app_canvas_circle', category: 'app-canvas', color: CV,
-    label: '在 {component} 画圆 ({x},{y}) 半径:{r}', labelKey: 'blocks.appCanvas.circle', shape: 'stack',
+    label: '在 {component} 画圆 ({x},{y}) 半径:{r}',
+    labels: { en: "Draw circle on {component} at ({x},{y}) radius:{r}" },
+    labelKey: 'blocks.appCanvas.circle', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -399,7 +423,9 @@
   });
   BlockRegistry.register({
     type: 'app_canvas_text', category: 'app-canvas', color: CV,
-    label: '在 {component} 写文字 {text} 于 ({x},{y})', labelKey: 'blocks.appCanvas.text', shape: 'stack',
+    label: '在 {component} 写文字 {text} 于 ({x},{y})',
+    labels: { en: "Write text {text} on {component} at ({x},{y})" },
+    labelKey: 'blocks.appCanvas.text', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -411,13 +437,17 @@
   BlockRegistry.separator('app-canvas');
   BlockRegistry.register({
     type: 'app_canvas_clear', category: 'app-canvas', color: CV,
-    label: '清除 {component} 画布', labelKey: 'blocks.appCanvas.clear', shape: 'stack',
+    label: '清除 {component} 画布',
+    labels: { en: "Clear canvas of {component}" },
+    labelKey: 'blocks.appCanvas.clear', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'component', type: 'string', default: '画布' }],
   });
   BlockRegistry.register({
     type: 'app_canvas_set_style', category: 'app-canvas', color: CV,
-    label: '设置 {component} 画笔颜色 {color} 粗细 {size}', labelKey: 'blocks.appCanvas.set_style', shape: 'stack',
+    label: '设置 {component} 画笔颜色 {color} 粗细 {size}',
+    labels: { en: "Set {component} pen color {color} width {size}" },
+    labelKey: 'blocks.appCanvas.set_style', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -427,7 +457,9 @@
   });
   BlockRegistry.register({
     type: 'app_canvas_fill', category: 'app-canvas', color: CV,
-    label: '设置 {component} 填充颜色 {color}', labelKey: 'blocks.appCanvas.fill', shape: 'stack',
+    label: '设置 {component} 填充颜色 {color}',
+    labels: { en: "Set {component} fill color {color}" },
+    labelKey: 'blocks.appCanvas.fill', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'component', type: 'string', default: '画布' },
@@ -438,13 +470,17 @@
   BlockRegistry.separator('app-canvas');
   BlockRegistry.register({
     type: 'app_canvas_get_width', category: 'app-canvas', color: CV,
-    label: '{component} 画布宽度', labelKey: 'blocks.appCanvas.get_width', shape: 'reporter',
+    label: '{component} 画布宽度',
+    labels: { en: "Canvas width of {component}" },
+    labelKey: 'blocks.appCanvas.get_width', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'component', type: 'string', default: '画布' }],
   });
   BlockRegistry.register({
     type: 'app_canvas_get_height', category: 'app-canvas', color: CV,
-    label: '{component} 画布高度', labelKey: 'blocks.appCanvas.get_height', shape: 'reporter',
+    label: '{component} 画布高度',
+    labels: { en: "Canvas height of {component}" },
+    labelKey: 'blocks.appCanvas.get_height', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'component', type: 'string', default: '画布' }],
   });

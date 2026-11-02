@@ -10,21 +10,27 @@
 
   BlockRegistry.register({
     type: 'mc_player_join', category: 'minecraft', color: C, mcOnly: true,
-    label: '👤 当玩家加入时', shape: 'hat',
+    label: '👤 当玩家加入时',
+    labels: { en: "When player joins" },
+    shape: 'hat',
     ports: { flowIn: false, flowOut: true },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'mc_player_chat', category: 'minecraft', color: C, mcOnly: true,
-    label: '💬 当玩家聊天 {msg} 时', shape: 'hat',
+    label: '💬 当玩家聊天 {msg} 时',
+    labels: { en: "When player chats {msg}" },
+    shape: 'hat',
     ports: { flowIn: false, flowOut: true },
     params: [{ name: 'msg', type: 'string', default: 'hello' }],
   });
 
   BlockRegistry.register({
     type: 'mc_block_break', category: 'minecraft', color: C, mcOnly: true,
-    label: '⛏ 当方块被破坏时', shape: 'hat',
+    label: '⛏ 当方块被破坏时',
+    labels: { en: "When block is broken" },
+    shape: 'hat',
     ports: { flowIn: false, flowOut: true },
     params: [],
   });
@@ -32,7 +38,9 @@
   BlockRegistry.register({
 
     type: 'mc_timer_tick', category: 'minecraft', color: C, mcOnly: true,
-    label: '⏱ 每隔 {ticks} tick', shape: 'hat',
+    label: '⏱ 每隔 {ticks} tick',
+    labels: { en: "Every {ticks} ticks" },
+    shape: 'hat',
     ports: { flowIn: false, flowOut: true },
     params: [{ name: 'ticks', type: 'number', default: 20 }],
   });
@@ -43,7 +51,9 @@
 
   BlockRegistry.register({
     type: 'mc_place_block', category: 'minecraft', color: C, mcOnly: true,
-    label: '📦 在 {x} {y} {z} 放置 {block}', shape: 'stack',
+    label: '📦 在 {x} {y} {z} 放置 {block}',
+    labels: { en: "Place {block} at {x} {y} {z}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'x', type: 'string', default: '~' },
@@ -58,7 +68,9 @@
 
   BlockRegistry.register({
     type: 'mc_fill_area', category: 'minecraft', color: C, mcOnly: true,
-    label: '📦 填充 {x1} {y1} {z1} 到 {x2} {y2} {z2} 为 {block}', shape: 'stack',
+    label: '📦 填充 {x1} {y1} {z1} 到 {x2} {y2} {z2} 为 {block}',
+    labels: { en: "Fill {x1} {y1} {z1} to {x2} {y2} {z2} with {block}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'x1', type: 'string', default: '~-3' },
@@ -76,7 +88,9 @@
 
   BlockRegistry.register({
     type: 'mc_replace_blocks', category: 'minecraft', color: C, mcOnly: true,
-    label: '🔄 将区域内 {from} 替换为 {to}', shape: 'stack',
+    label: '🔄 将区域内 {from} 替换为 {to}',
+    labels: { en: "Replace {from} with {to} in area" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'from', type: 'dropdown', default: 'stone',
@@ -91,7 +105,9 @@
   BlockRegistry.register({
 
     type: 'mc_clear_area', category: 'minecraft', color: C, mcOnly: true,
-    label: '🗑 清除 {x1} {y1} {z1} 到 {x2} {y2} {z2}', shape: 'stack',
+    label: '🗑 清除 {x1} {y1} {z1} 到 {x2} {y2} {z2}',
+    labels: { en: "Clear {x1} {y1} {z1} to {x2} {y2} {z2}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'x1', type: 'string', default: '~-3' },
@@ -109,7 +125,9 @@
 
   BlockRegistry.register({
     type: 'mc_spawn_entity', category: 'minecraft', color: C, mcOnly: true,
-    label: '🐾 在 {x} {y} {z} 生成 {count} 只 {entity}', shape: 'stack',
+    label: '🐾 在 {x} {y} {z} 生成 {count} 只 {entity}',
+    labels: { en: "Spawn {count} {entity} at {x} {y} {z}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'x', type: 'string', default: '~' },
@@ -127,7 +145,9 @@
 
   BlockRegistry.register({
     type: 'mc_kill_nearby', category: 'minecraft', color: C, mcOnly: true,
-    label: '💀 杀死 {radius} 格内的 {entity}', shape: 'stack',
+    label: '💀 杀死 {radius} 格内的 {entity}',
+    labels: { en: "Kill {entity} within {radius} blocks" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'radius', type: 'number', default: 10 },
@@ -140,7 +160,9 @@
   BlockRegistry.register({
 
     type: 'mc_teleport_entity', category: 'minecraft', color: C, mcOnly: true,
-    label: '🌀 传送 {target} 到 {x} {y} {z}', shape: 'stack',
+    label: '🌀 传送 {target} 到 {x} {y} {z}',
+    labels: { en: "Teleport {target} to {x} {y} {z}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'target', type: 'string', default: '@e[type=zombie,r=10]' },
@@ -156,7 +178,9 @@
 
   BlockRegistry.register({
     type: 'mc_teleport_player', category: 'minecraft', color: C, mcOnly: true,
-    label: '🌀 传送玩家到 {x} {y} {z}', shape: 'stack',
+    label: '🌀 传送玩家到 {x} {y} {z}',
+    labels: { en: "Teleport player to {x} {y} {z}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'x', type: 'string', default: '0' },
@@ -167,7 +191,9 @@
 
   BlockRegistry.register({
     type: 'mc_give_item', category: 'minecraft', color: C, mcOnly: true,
-    label: '🎁 给予 {count} 个 {item}', shape: 'stack',
+    label: '🎁 给予 {count} 个 {item}',
+    labels: { en: "Give {count} {item}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'count', type: 'number', default: 1 },
@@ -183,7 +209,9 @@
 
   BlockRegistry.register({
     type: 'mc_set_gamemode', category: 'minecraft', color: C, mcOnly: true,
-    label: '🎮 设置游戏模式为 {mode}', shape: 'stack',
+    label: '🎮 设置游戏模式为 {mode}',
+    labels: { en: "Set game mode to {mode}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'mode', type: 'dropdown', default: 'survival',
@@ -194,7 +222,9 @@
   BlockRegistry.register({
 
     type: 'mc_add_effect', category: 'minecraft', color: C, mcOnly: true,
-    label: '✨ 添加 {effect} 效果 {duration} 秒 {level} 级', shape: 'stack',
+    label: '✨ 添加 {effect} 效果 {duration} 秒 {level} 级',
+    labels: { en: "Add {effect} effect for {duration}s level {level}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'effect', type: 'dropdown', default: 'speed',
@@ -211,7 +241,9 @@
 
   BlockRegistry.register({
     type: 'mc_set_time', category: 'minecraft', color: C, mcOnly: true,
-    label: '🕐 设置时间为 {time}', shape: 'stack',
+    label: '🕐 设置时间为 {time}',
+    labels: { en: "Set time to {time}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'time', type: 'dropdown', default: 'day',
@@ -221,7 +253,9 @@
 
   BlockRegistry.register({
     type: 'mc_set_weather', category: 'minecraft', color: C, mcOnly: true,
-    label: '🌤 设置天气为 {weather}', shape: 'stack',
+    label: '🌤 设置天气为 {weather}',
+    labels: { en: "Set weather to {weather}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'weather', type: 'dropdown', default: 'clear',
@@ -231,7 +265,9 @@
 
   BlockRegistry.register({
     type: 'mc_set_gamerule', category: 'minecraft', color: C, mcOnly: true,
-    label: '⚙ 设置 {rule} 为 {value}', shape: 'stack',
+    label: '⚙ 设置 {rule} 为 {value}',
+    labels: { en: "Set {rule} to {value}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'rule', type: 'dropdown', default: 'keepinventory',
@@ -246,7 +282,9 @@
   BlockRegistry.register({
 
     type: 'mc_send_message', category: 'minecraft', color: C, mcOnly: true,
-    label: '💬 广播消息 {msg}', shape: 'stack',
+    label: '💬 广播消息 {msg}',
+    labels: { en: "Broadcast message {msg}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'msg', type: 'string', default: 'Hello from Objector!' },
@@ -259,7 +297,9 @@
 
   BlockRegistry.register({
     type: 'mc_build_wall', category: 'minecraft', color: C, mcOnly: true,
-    label: '🧱 生成 {block} 墙壁 长{length} 高{height} 方向{dir}', shape: 'stack',
+    label: '🧱 生成 {block} 墙壁 长{length} 高{height} 方向{dir}',
+    labels: { en: "Build {block} wall length {length} height {height} facing {dir}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'block', type: 'dropdown', default: 'cobblestone',
@@ -273,7 +313,9 @@
 
   BlockRegistry.register({
     type: 'mc_build_floor', category: 'minecraft', color: C, mcOnly: true,
-    label: '🟫 生成 {block} 地板 {size}x{size}', shape: 'stack',
+    label: '🟫 生成 {block} 地板 {size}x{size}',
+    labels: { en: "Build {block} floor {size}x{size}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'block', type: 'dropdown', default: 'oak_planks',
@@ -286,7 +328,9 @@
   BlockRegistry.register({
 
     type: 'mc_build_house', category: 'minecraft', color: C, mcOnly: true,
-    label: '🏠 生成简易房屋 墙{wall} 顶{roof} 大小{size}', shape: 'stack',
+    label: '🏠 生成简易房屋 墙{wall} 顶{roof} 大小{size}',
+    labels: { en: "Build simple house wall {wall} roof {roof} size {size}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'wall', type: 'dropdown', default: 'oak_planks',
@@ -305,7 +349,9 @@
 
   BlockRegistry.register({
     type: 'mc_loop_command', category: 'minecraft', color: C, mcOnly: true,
-    label: '🔁 循环执行 {cmd} {times} 次 (间隔 {delay} 秒)', shape: 'stack',
+    label: '🔁 循环执行 {cmd} {times} 次 (间隔 {delay} 秒)',
+    labels: { en: "Repeat {cmd} {times} times (every {delay}s)" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'cmd', type: 'string', default: 'say Hello' },
@@ -316,7 +362,9 @@
 
   BlockRegistry.register({
     type: 'mc_delay_command', category: 'minecraft', color: C, mcOnly: true,
-    label: '⏳ 延迟 {delay} 秒后执行 {cmd}', shape: 'stack',
+    label: '⏳ 延迟 {delay} 秒后执行 {cmd}',
+    labels: { en: "Run {cmd} after {delay}s" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'delay', type: 'number', default: 3 },
@@ -327,7 +375,9 @@
   BlockRegistry.register({
 
     type: 'mc_custom_command', category: 'minecraft', color: C, mcOnly: true,
-    label: '⚡ 执行命令 {cmd}', shape: 'stack',
+    label: '⚡ 执行命令 {cmd}',
+    labels: { en: "Run command {cmd}" },
+    shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'cmd', type: 'string', default: 'say Custom command' },
@@ -340,28 +390,36 @@
 
   BlockRegistry.register({
     type: 'mc_get_player_x', category: 'minecraft', color: C, mcOnly: true,
-    label: '玩家 X 坐标', shape: 'reporter',
+    label: '玩家 X 坐标',
+    labels: { en: "Player X" },
+    shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'mc_get_player_y', category: 'minecraft', color: C, mcOnly: true,
-    label: '玩家 Y 坐标', shape: 'reporter',
+    label: '玩家 Y 坐标',
+    labels: { en: "Player Y" },
+    shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'mc_get_player_z', category: 'minecraft', color: C, mcOnly: true,
-    label: '玩家 Z 坐标', shape: 'reporter',
+    label: '玩家 Z 坐标',
+    labels: { en: "Player Z" },
+    shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'mc_get_player_name', category: 'minecraft', color: C, mcOnly: true,
-    label: '玩家名称', shape: 'reporter',
+    label: '玩家名称',
+    labels: { en: "Player name" },
+    shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });

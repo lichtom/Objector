@@ -24,6 +24,7 @@
   BlockRegistry.register({
     type: 'var_show', category: 'variables', color: C,
     label: '显示变量 {name}', labelKey: 'blocks.variables.var_show', shape: 'stack',
+    code: { python: "run_block(\"var_show\", \"name\", {name})", javascript: "run_block(\"var_show\", \"name\", {name})", alb: "run_block(\"var_show\", \"name\", {name})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'name', type: 'string', default: '变量' }],
   });
@@ -31,6 +32,7 @@
 
     type: 'var_hide', category: 'variables', color: C,
     label: '隐藏变量 {name}', labelKey: 'blocks.variables.var_hide', shape: 'stack',
+    code: { python: "run_block(\"var_hide\", \"name\", {name})", javascript: "run_block(\"var_hide\", \"name\", {name})", alb: "run_block(\"var_hide\", \"name\", {name})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'name', type: 'string', default: '变量' }],
   });

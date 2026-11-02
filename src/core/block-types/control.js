@@ -6,6 +6,7 @@
   BlockRegistry.register({
     type: 'wait', category: 'control', color: C,
     label: '等待 {sec} 秒', labelKey: 'blocks.control.wait', shape: 'stack',
+    code: { python: "sleep({sec})", javascript: "sleep({sec})", alb: "sleep({sec})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'sec', type: 'number', default: 1 }],
   });
@@ -47,6 +48,7 @@
 
     type: 'stop_all', category: 'control', color: C,
     label: '停止全部', labelKey: 'blocks.control.stop_all', shape: 'stack',
+    code: { python: "stop_all()", javascript: "stop_all()", alb: "stop_all()" },
     ports: { flowIn: true, flowOut: false }, params: [],
   });
   BlockRegistry.register({

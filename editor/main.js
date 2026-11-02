@@ -344,9 +344,10 @@ ipcMain.handle('select-extension-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: '扩展文件', extensions: ['json', 'js'] },
+      { name: '扩展文件', extensions: ['json', 'js', 'py'] },
       { name: 'JSON 扩展', extensions: ['json'] },
       { name: 'JavaScript 扩展', extensions: ['js'] },
+      { name: 'Python 扩展', extensions: ['py'] },
       { name: '所有文件', extensions: ['*'] },
     ],
   });

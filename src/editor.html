@@ -212,6 +212,11 @@
         <div id="debug-panel"></div>
       </div>
       <div id="files-content" class="hidden" style="display:none;">
+        <div class="file-editor-toolbar">
+          <button class="tb-btn" id="btn-file-editor-new" data-i18n="fileEditor.newFile">+ 新建文件</button>
+          <button class="tb-btn" id="btn-save-file" data-i18n="fileEditor.save">💾 保存</button>
+          <button class="tb-btn" id="btn-load-test" data-i18n="fileEditor.loadTest">▶ 加载测试</button>
+        </div>
         <div id="file-list"></div>
         <textarea id="file-editor-area" data-i18n-ph="fileEditor.placeholder" placeholder="选择或新建文件开始编辑..." spellcheck="false"></textarea>
       </div>
@@ -700,6 +705,7 @@
   <script src="../interpreter/skulpt-stdlib.js"></script>
   <script src="../interpreter/python.js"></script>
   <script src="core/code-runtime.js"></script>
+  <script src="core/code-mode-blocks.js"></script>
   <script src="core/codemirror-alb.js"></script>
   <script src="editor-app.js"></script>
 </body>

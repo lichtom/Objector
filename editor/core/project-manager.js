@@ -146,6 +146,13 @@ const ProjectManager = (function () {
     if (config.mode === 'advanced' && typeof EditorApp !== 'undefined' && EditorApp.getAllSpriteScripts) {
       config.jsScripts = EditorApp.getAllSpriteScripts();
     }
+    // 代码编程模式：保存按角色的代码（角色名 -> { python, javascript, alb }）
+    // 闸门: 磁盘代码尚未恢复完成时（项目加载中途自动保存）不用内存模板覆盖已有 codeScripts
+    if (config.mode && String(config.mode).indexOf('code') === 0 && typeof EditorApp !== 'undefined' && EditorApp.getAllCodeScripts
+        && (!EditorApp.isCodeScriptsRestored || EditorApp.isCodeScriptsRestored())) {
+      config.codeScripts = EditorApp.getAllCodeScripts();
+      if (EditorApp.getCodeLangRunner) config.codeLang = EditorApp.getCodeLangRunner();
+    }
     // 高级模式：保存场景图
     if (config.mode === 'advanced' && typeof SceneGraph !== 'undefined') {
       // 同步当前状态到 SceneGraph

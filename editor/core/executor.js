@@ -1781,7 +1781,37 @@ const Executor = (function () {
     if (subTop) return await executeChain(subTop, scope || {});
   }
 
-  return { run, stop, forceStop, getOutput, clearOutput, setPostStartCallback, _getGlobalVars, runBlock: publicRunBlock, runSubBlock: publicRunSubBlock };
+  // 代码模式 run_block 用的虚拟积木序号
+  let _virtualSeq = 0;
+
+  /** 公开API：按积木类型执行单个积木（参数为字面值，供代码编程模式 run_block 使用）
+   *  - 堆叠/帽形积木: 副作用在首个 await 前已发生, 返回 Promise（调用方可 fire-and-forget）
+   *  - reporter/boolean 积木: 返回求值结果（异步积木为 Promise）
+   *  不支持子代码槽与积木引用参数（代码模式请改用语言原生循环）
+   */
+  async function publicExecBlockType(type, params) {
+    const def = BlockRegistry.getBlock(type);
+    if (!def) return undefined;
+    const p = {};
+    (def.params || []).forEach(q => { p[q.name] = q.default; });
+    if (params) Object.keys(params).forEach(k => { p[k] = params[k]; });
+    const block = {
+      id: '__code_' + (++_virtualSeq) + '_' + type, type,
+      x: 0, y: 0, params: p, flowIn: null, flowOut: null,
+      paramConnections: {}, subBlocks: {},
+    };
+    const scope = { spriteIdx: typeof StageManager !== 'undefined' ? StageManager.getActiveSpriteIdx() : 0 };
+    if (def.shape === 'reporter' || def.shape === 'boolean') return await evaluateReporter(block, scope);
+    return await executeBlock(block, scope);
+  }
+
+  /** 公开API：读写积木的全局变量/列表（供代码编程模式使用, 列表为原数组引用） */
+  function publicGetVar(name) { return _globalVars[String(name)]; }
+  function publicSetVar(name, val) { _globalVars[String(name)] = val; }
+  /** 公开API：最近一次“询问”积木的回答 */
+  function publicGetAnswer() { return _answer; }
+
+  return { run, stop, forceStop, getOutput, clearOutput, setPostStartCallback, _getGlobalVars, runBlock: publicRunBlock, runSubBlock: publicRunSubBlock, execBlockType: publicExecBlockType, getVarValue: publicGetVar, setVarValue: publicSetVar, getAnswer: publicGetAnswer };
 })();
 
 /**

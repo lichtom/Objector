@@ -184,6 +184,23 @@ const Palette = (function () {
     const advancedLayout = document.getElementById('advanced-layout');
     const isAdvanced = advancedLayout && !advancedLayout.classList.contains('hidden');
 
+    // 代码编程模式: 拖积木到代码框 → 自动转换为当前语言的代码
+    const codeLayoutEl = document.getElementById('code-layout');
+    const isCodeMode = codeLayoutEl && !codeLayoutEl.classList.contains('hidden');
+    if (isCodeMode) {
+      const codeWrap = document.getElementById('code-editor-wrap');
+      if (codeWrap && typeof EditorApp !== 'undefined' && EditorApp.insertBlockAsCode) {
+        const rect = codeWrap.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 &&
+            e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          EditorApp.insertBlockAsCode(draggingType, e.clientX - rect.left, e.clientY - rect.top);
+        }
+      }
+      draggingType = null;
+      return;
+    }
+
     if (isAdvanced && typeof EditorCanvas !== 'undefined' && EditorCanvas.getCanvas) {
       // 高级模式：canvas 被移入 script-blocks-content，用 canvas 本身作为目标
       targetEl = EditorCanvas.getCanvas();

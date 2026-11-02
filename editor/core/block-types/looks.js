@@ -58,12 +58,14 @@
   BlockRegistry.register({
     type: 'looks_set_color', category: 'looks', color: C,
     label: '将颜色特效设为 {val}', labelKey: 'blocks.looks.looks_set_color', shape: 'stack',
+    code: { python: "run_block(\"looks_set_color\", \"val\", {val})", javascript: "run_block(\"looks_set_color\", \"val\", {val})", alb: "run_block(\"looks_set_color\", \"val\", {val})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'val', type: 'number', default: 0 }],
   });
   BlockRegistry.register({
     type: 'looks_clear_effects', category: 'looks', color: C,
     label: '清除图形特效', labelKey: 'blocks.looks.looks_clear_effects', shape: 'stack',
+    code: { python: "run_block(\"looks_clear_effects\")", javascript: "run_block(\"looks_clear_effects\")", alb: "run_block(\"looks_clear_effects\")" },
     ports: { flowIn: true, flowOut: true }, params: [],
   });
   BlockRegistry.register({

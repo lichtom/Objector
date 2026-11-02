@@ -24,7 +24,7 @@ const FileEditor = (function () {
 
     // 读取目录
     const entries = await window.api.listDir(dir);
-    files = (entries || []).filter(f => f.endsWith('.js') || f.endsWith('.json'));
+    files = (entries || []).filter(f => f.endsWith('.js') || f.endsWith('.json') || f.endsWith('.py'));
 
     listEl.innerHTML = '';
     files.forEach(fname => {
@@ -68,7 +68,7 @@ const FileEditor = (function () {
       overlay.innerHTML = `
         <div class="dialog-box" style="max-width:360px;text-align:left;">
           <h2 style="text-align:center;">新建文件</h2>
-          <p style="text-align:center;">输入文件名（以 .js 或 .json 结尾）</p>
+          <p style="text-align:center;">输入文件名（以 .js / .json / .py 结尾）</p>
           <input id="filename-input" type="text" placeholder="my-extension.js"
             style="width:100%;padding:8px 12px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);font-size:14px;outline:none;margin-bottom:16px;" />
           <div class="dialog-actions">
@@ -108,8 +108,10 @@ const FileEditor = (function () {
     if (!fname) return;
 
     // 验证文件名
-    if (!fname.endsWith('.js') && !fname.endsWith('.json')) {
-      alert(i18n.isEnglish() ? 'File name must end with .js or .json' : '文件名必须以 .js 或 .json 结尾');
+    if (!fname.endsWith('.js') && !fname.endsWith('.json') && !fname.endsWith('.py')) {
+      alert(i18n.isEnglish()
+        ? 'File name must end with .js, .json or .py'
+        : '文件名必须以 .js / .json / .py 结尾');
       return;
     }
 
@@ -136,6 +138,8 @@ const FileEditor = (function () {
         version: '1.0.0',
         blocks: []
       }, null, 2);
+    } else if (fname.endsWith('.py')) {
+      content = pyExtTemplate(fname.replace(/\.py$/i, ''));
     } else {
       content = '/**\n * Extension: ' + fname + '\n */\n\n// Write extension code here\n';
     }
@@ -345,6 +349,49 @@ const FileEditor = (function () {
     });
   }
 
+  /** 生成 Python 扩展文件模板（先 def 执行函数, 最后 register_extension） */
+  function pyExtTemplate(name) {
+    const extId = String(name).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_?\d.*$/, 'ext_$&') || 'py_extension';
+    return [
+      '# Objector 扩展开发 · Python',
+      '# 积木执行器用 def 编写, register_extension 必须写在所有 def 之后',
+      '# 执行器接收两个 dict: params（积木参数）与 scope（执行上下文）, 返回值即 reporter 结果',
+      '# 可直接调用的舞台 API: say show hide move turn_right goto_xy set_x get_x get_var set_var ...',
+      '',
+      'def ext_say(params, scope):',
+      '    say(params["text"])',
+      '    print("扩展被调用: " + str(params["text"]))',
+      '',
+      'def ext_add(params, scope):',
+      '    return params["a"] + params["b"]',
+      '',
+      'register_extension({',
+      '    "id": "' + extId + '",',
+      '    "name": "' + name + '",',
+      '    "color": "#FF6B6B",',
+      '    "blocks": [',
+      '        {',
+      '            "type": "ext_say", "label": "说 {text}", "shape": "stack",',
+      '            "params": [ {"name": "text", "type": "string", "default": "你好"} ],',
+      '            "code_exp": { "python": "say_it", "ALB": "say_it", "JavaScript": "sayIt" },',
+      '        },',
+      '        {',
+      '            "type": "ext_add", "label": "{a} 加 {b}", "shape": "reporter",',
+      '            "params": [',
+      '                {"name": "a", "type": "number", "default": 1},',
+      '                {"name": "b", "type": "number", "default": 1},',
+      '            ],',
+      '        },',
+      '    ],',
+      '    "executors": {',
+      '        "ext_say": ext_say,',
+      '        "ext_add": ext_add,',
+      '    },',
+      '})',
+      '',
+    ].join('\n');
+  }
+
   /** 初始化（绑定按钮事件） */
   function init() {
     const newBtn = document.getElementById('btn-file-editor-new');
@@ -358,5 +405,5 @@ const FileEditor = (function () {
     bindEditorKeys();
   }
 
-  return { init, refreshFileList, openFile, createFile, saveFile };
+  return { init, refreshFileList, openFile, createFile, saveFile, pyExtTemplate };
 })();

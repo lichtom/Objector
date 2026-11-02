@@ -7,6 +7,16 @@ const StageManager = (function () {
   let _isExecuting = false;  // 执行期间禁止积木同步
   let _executingIdx = -1;   // 执行时的目标精灵（不影响 _activeIdx）
   const STAGE_W = 480, STAGE_H = 360;
+  let _onActiveSpriteCb = null; // 编辑器选择角色时的回调（代码模式按角色切换代码）
+
+  /** 通知监听者：编辑器当前选中的角色发生变化（执行期间不触发） */
+  function _notifyActiveSpriteChange() {
+    if (_isExecuting || !_onActiveSpriteCb) return;
+    try { _onActiveSpriteCb(_activeIdx); } catch (e) { console.warn('[StageManager] activeSprite 回调错误:', e); }
+  }
+
+  /** 注册角色选择监听（传 null 取消） */
+  function onActiveSpriteChange(fn) { _onActiveSpriteCb = typeof fn === 'function' ? fn : null; }
 
   function init() {
     console.log('[StageManager] init() called');
@@ -19,6 +29,7 @@ const StageManager = (function () {
     _activeIdx = 1;  // 默认选中精灵 1
     console.log('[StageManager] Sprites created:', _sprites.length);
     renderSpriteList();
+    _notifyActiveSpriteChange();
   }
 
   function getSprites() { return _sprites; }
@@ -66,6 +77,7 @@ const StageManager = (function () {
         EditorState.blocks = _sprites[_activeIdx].blocks || {};
       }
       renderSpriteList();
+      _notifyActiveSpriteChange();
     }
   }
 
@@ -76,6 +88,7 @@ const StageManager = (function () {
     s.blocks = {};
     _sprites.push(s);
     renderSpriteList();
+    _notifyActiveSpriteChange();
     return s;
   }
 
@@ -96,6 +109,7 @@ const StageManager = (function () {
       EditorState.blocks = { ...(_sprites[_activeIdx].blocks || {}) };
     }
     renderSpriteList();
+    _notifyActiveSpriteChange();
     return true;
   }
 
@@ -720,6 +734,7 @@ const StageManager = (function () {
     orbitAround, clampToStage, wrapAround, goBack,
     getSpeed, getDistanceToPoint, getDirectionToPoint,
     getSpriteData, restoreSprites, getAllBlocks, getSpriteCount, setExecuting,
+    onActiveSpriteChange, notifyActiveSpriteChange: _notifyActiveSpriteChange,
     // SceneGraph 适配
     syncFromSceneGraph, syncToSceneGraph, addSpriteAdvanced,
     STAGE_W, STAGE_H,

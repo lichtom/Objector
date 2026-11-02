@@ -26,6 +26,7 @@
 
     type: 'event_broadcast', category: 'events', color: C,
     label: '📡 广播 {msg}', labelKey: 'blocks.events.event_broadcast', shape: 'stack',
+    code: { python: "run_block(\"event_broadcast\", \"msg\", {msg})", javascript: "run_block(\"event_broadcast\", \"msg\", {msg})", alb: "run_block(\"event_broadcast\", \"msg\", {msg})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'msg', type: 'string', default: '消息1' }],
   });

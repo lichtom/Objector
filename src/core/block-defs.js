@@ -18,7 +18,14 @@ const BlockRegistry = (function () {
      * def: {
      *   type: 'move_steps',        // 唯一标识
      *   category: 'motion',        // 所属分类
-     *   label: '移动 {steps} 步',   // 显示文本，{name} 为参数占位
+     *   label: '移动 {steps} 步',   // 显示文本（中文基准）, {name} 为参数占位
+     *   labels: { en: 'Move {steps} steps' },   // 可选: 内联注册其它语言的标签
+     *   code: {                    // 可选: 内联注册各编程语言的代码翻译（代码模式拖积木生成代码）
+     *     python: 'move({steps})',            // 字符串或行数组
+     *     javascript: 'move({steps})',
+     *     alb: '(move {steps})',
+     *   },
+     *   codeFn: (def, lang) => lines,         // 可选: 动态生成代码翻译（优先于 code）
      *   shape: 'stack',            // stack(普通)|hat(事件帽)|reporter(返回值)|boolean(菱形)|c-block(C形含子代码)
      *   ports: { flowIn, flowOut, params:[], subBlocks:[] },
      *   params: [{ name:'steps', type:'number', default:10 }],
@@ -86,14 +93,20 @@ const BlockRegistry = (function () {
       };
     },
 
-    /** 获取积木的有效标签（支持动态标签 + i18n） */
+    /** 获取积木的有效标签（支持动态标签 + 多语言）
+     *  优先级: getLabel(动态) > labels[当前语言](内联) > labelKey(i18n 数据) > label(中文)
+     */
     getLabel(block) {
       const def = _blocks[block.type];
       if (!def) return '';
       if (typeof def.getLabel === 'function') {
         return def.getLabel(block);
       }
-      // i18n: 优先通过 labelKey 查找翻译，fallback 到 label
+      // i18n: 内联多语言标签（中文用 label, labels 只需提供其它语言）
+      if (def.labels && typeof i18n !== 'undefined') {
+        return i18n.pick(def.labels, def.labelKey ? i18n.t(def.labelKey, def.label) : def.label);
+      }
+      // i18n: 通过 labelKey 查找翻译，fallback 到 label
       if (def.labelKey && typeof i18n !== 'undefined') {
         var translated = i18n.t(def.labelKey, def.label);
         return translated;

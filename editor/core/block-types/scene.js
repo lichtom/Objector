@@ -10,7 +10,9 @@
   BlockRegistry.register({
 
     type: 'scene_on_load', category: 'scene', color: C,
-    label: '🎬 当场景加载时', labelKey: 'blocks.scene.scene_on_load', shape: 'hat',
+    label: '🎬 当场景加载时',
+    labels: { en: "When scene loads" },
+    labelKey: 'blocks.scene.scene_on_load', shape: 'hat',
     ports: { flowIn: false, flowOut: true },
     params: [],
   });
@@ -20,7 +22,9 @@
   // === 场景切换 ===
   BlockRegistry.register({
     type: 'scene_switch', category: 'scene', color: C,
-    label: '切换场景 {name}', labelKey: 'blocks.scene.scene_switch', shape: 'stack',
+    label: '切换场景 {name}',
+    labels: { en: "Switch to scene {name}" },
+    labelKey: 'blocks.scene.scene_switch', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'name', type: 'string', default: 'main' }],
   });
@@ -28,7 +32,9 @@
   BlockRegistry.register({
 
     type: 'scene_switch_with_transition', category: 'scene', color: C,
-    label: '切换场景 {name} 淡入 {duration}秒', labelKey: 'blocks.scene.scene_switch_with_transition', shape: 'stack',
+    label: '切换场景 {name} 淡入 {duration}秒',
+    labels: { en: "Switch to scene {name} fade in {duration}s" },
+    labelKey: 'blocks.scene.scene_switch_with_transition', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'name', type: 'string', default: 'main' },
@@ -41,7 +47,9 @@
   // === 场景保存 ===
   BlockRegistry.register({
     type: 'scene_save', category: 'scene', color: C,
-    label: '保存当前场景为 {name}', labelKey: 'blocks.scene.scene_save', shape: 'stack',
+    label: '保存当前场景为 {name}',
+    labels: { en: "Save current scene as {name}" },
+    labelKey: 'blocks.scene.scene_save', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'name', type: 'string', default: 'main' }],
   });
@@ -49,7 +57,9 @@
   BlockRegistry.register({
 
     type: 'scene_save_auto', category: 'scene', color: C,
-    label: '保存当前场景（使用原名）', labelKey: 'blocks.scene.scene_save_auto', shape: 'stack',
+    label: '保存当前场景（使用原名）',
+    labels: { en: "Save current scene (keep name)" },
+    labelKey: 'blocks.scene.scene_save_auto', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [],
   });
@@ -60,7 +70,9 @@
   BlockRegistry.register({
 
     type: 'scene_reload', category: 'scene', color: C,
-    label: '重新加载当前场景', labelKey: 'blocks.scene.scene_reload', shape: 'stack',
+    label: '重新加载当前场景',
+    labels: { en: "Reload current scene" },
+    labelKey: 'blocks.scene.scene_reload', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [],
   });
@@ -71,7 +83,9 @@
   BlockRegistry.register({
 
     type: 'scene_create', category: 'scene', color: C,
-    label: '新建场景 {name} 类型 {type}', labelKey: 'blocks.scene.scene_create', shape: 'stack',
+    label: '新建场景 {name} 类型 {type}',
+    labels: { en: "Create scene {name} type {type}" },
+    labelKey: 'blocks.scene.scene_create', shape: 'stack',
     ports: { flowIn: true, flowOut: true },
     params: [
       { name: 'name', type: 'string', default: 'level2' },
@@ -84,35 +98,45 @@
   // === 报告器（查询信息） ===
   BlockRegistry.register({
     type: 'scene_name', category: 'scene', color: C,
-    label: '当前场景名', labelKey: 'blocks.scene.scene_name', shape: 'reporter',
+    label: '当前场景名',
+    labels: { en: "Current scene name" },
+    labelKey: 'blocks.scene.scene_name', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'scene_type', category: 'scene', color: C,
-    label: '当前场景类型', labelKey: 'blocks.scene.scene_type', shape: 'reporter',
+    label: '当前场景类型',
+    labels: { en: "Current scene type" },
+    labelKey: 'blocks.scene.scene_type', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'scene_exists', category: 'scene', color: C,
-    label: '场景 {name} 存在?', labelKey: 'blocks.scene.scene_exists', shape: 'boolean',
+    label: '场景 {name} 存在?',
+    labels: { en: "Scene {name} exists?" },
+    labelKey: 'blocks.scene.scene_exists', shape: 'boolean',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'name', type: 'string', default: 'main' }],
   });
 
   BlockRegistry.register({
     type: 'scene_node_count', category: 'scene', color: C,
-    label: '当前场景节点数', labelKey: 'blocks.scene.scene_node_count', shape: 'reporter',
+    label: '当前场景节点数',
+    labels: { en: "Current scene node count" },
+    labelKey: 'blocks.scene.scene_node_count', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
 
   BlockRegistry.register({
     type: 'scene_node_type', category: 'scene', color: C,
-    label: '节点 {id} 的类型', labelKey: 'blocks.scene.scene_node_type', shape: 'reporter',
+    label: '节点 {id} 的类型',
+    labels: { en: "Type of node {id}" },
+    labelKey: 'blocks.scene.scene_node_type', shape: 'reporter',
     ports: { flowIn: false, flowOut: false },
     params: [{ name: 'id', type: 'string', default: '1' }],
   });

@@ -65,6 +65,7 @@
   <tr><td><code>params</code></td><td>array</td><td>否</td><td>参数列表</td></tr>
   <tr><td><code>ports</code></td><td>object</td><td>否</td><td>端口配置 <code>{ flowIn, flowOut }</code>（自动推断）</td></tr>
   <tr><td><code>subBlocks</code></td><td>array</td><td>否</td><td>子代码区域名列表，仅 <code>c-block</code> 使用</td></tr>
+  <tr><td><code>code_exp</code></td><td>object</td><td>否</td><td>代码编程模式下的函数名，如 <code>{ "python": "hello", "ALB": "hello", "JavaScript": "hello" }</code></td></tr>
 </table>
 
 <h3>积木形状说明</h3>
@@ -102,6 +103,93 @@
 
 <h3>boolean 执行器示例（返回布尔值）</h3>
 <pre><code>"ext_is_even": "function(params) { return Number(params.n) % 2 === 0; }"</code></pre>
+
+<h2>3.1 代码编程模式使用（code_exp）</h2>
+<p>给积木加上非必填属性 <code>code_exp</code>，指定它在三种代码语言中的函数名后，安装该扩展即可在代码编程模式直接调用（打开项目或安装扩展时动态加载 API）：</p>
+<pre><code>{
+  "id": "h",
+  "name": "h",
+  "blocks": [
+    { "type": "ext_hello", "label": "打招呼", "shape": "stack",
+      "code_exp": { "python": "hello", "ALB": "hello", "JavaScript": "hello" } }
+  ],
+  "executors": { "ext_hello": "function(params, scope) { console.log('hello'); }" }
+}</code></pre>
+<table>
+  <tr><th>代码模式</th><th>调用写法</th></tr>
+  <tr><td>JavaScript</td><td><code>h.hello()</code>（以扩展名作为命名空间对象）</td></tr>
+  <tr><td>Python</td><td><code>h.hello()</code></td></tr>
+  <tr><td>ALB</td><td><code>(h_hello)</code>（函数名前加扩展名，用 <code>_</code> 分隔）</td></tr>
+</table>
+<p>若积木有 <code>params</code>，参数按定义顺序作为位置参数传递：<code>h.add(1, 2)</code> / <code>(h_add 1 2)</code>。没有写 <code>code_exp</code> 的积木也会自动转为通用桥 <code>run_block</code>（见 3.3），仍然能在代码模式调用执行。</p>
+
+<h2>3.2 积木多语言标签（labels）</h2>
+<p>每个积木都可以在注册时内联声明各语言的显示文本，<strong>新增语言不需要修改任何 i18n 数据文件</strong>：</p>
+<pre><code>BlockRegistry.register({
+  type: 'ext_hello',
+  category: 'h', color: '#8A2BE2',
+  label: '打招呼 {name}',                       // 中文基准（写在代码里）
+  labels: {                                     // 非中文语言的内联翻译
+    en: 'Say hello to {name}',
+    // ja: '{name} に挨拶する',                 // 随时可扩展第三种语言
+  },
+  shape: 'stack', params: [{ name: 'name', type: 'string', default: 'Objector' }],
+});</code></pre>
+<p>标签解析优先级（<code>BlockRegistry.getLabel</code>）：</p>
+<table>
+  <tr><th>顺序</th><th>来源</th><th>说明</th></tr>
+  <tr><td>1</td><td><code>getLabel(block)</code></td><td>动态标签函数，可用 <code>i18n.L({zh, en}, 兜底)</code></td></tr>
+  <tr><td>2</td><td><code>labels[当前语言]</code></td><td>内联多语言映射，缺当前语言时回退 <code>zh-CN</code> 键</td></tr>
+  <tr><td>3</td><td><code>labelKey</code></td><td>走 <code>i18n.t()</code> 查询 <code>src/i18n/*.js</code> 数据表</td></tr>
+  <tr><td>4</td><td><code>label</code></td><td>中文原文</td></tr>
+</table>
+<p>语言查找由 <code>i18n.pick(map, fallback)</code> 完成：<code>当前 locale → locale 主语言段（en-US → en）→ zh-CN → fallback</code>，因此只写 <code>en</code> 也能在 <code>en-US</code> 下正确显示。JSON / JS / Python 三种扩展格式同样支持该属性（JSON 写成 <code>"labels": { "en": "..." }</code>）。</p>
+
+<h2>3.3 积木代码翻译（code / codeFn）与通用桥</h2>
+<p>积木可内联注册它在代码模式下等价的三语言写法，把积木拖进代码框时会直接展开：</p>
+<pre><code>BlockRegistry.register({
+  type: 'ext_add', label: '{a} 加 {b} 的和', shape: 'reporter',
+  code: {
+    python:     '({a} + {b})',
+    javascript: '({a} + {b})',
+    alb:        '(+ {a} {b})',
+  },
+  params: [{ name: 'a', type: 'number', default: 0 }, { name: 'b', type: 'number', default: 0 }],
+});
+
+// 需要根据参数动态组织时, 用 codeFn（返回行数组或单个字符串）
+BlockRegistry.register({
+  type: 'ext_repeat_n', label: '重复 {times} 次做 {what}', shape: 'stack',
+  codeFn: (def, lang) => lang === 'python'
+    ? ['for _i in range({times}):', '    pass']
+    : undefined,   // 返回 undefined 时继续用 code / 通用桥
+});</code></pre>
+<table>
+  <tr><th>占位符</th><th>展开结果</th></tr>
+  <tr><td><code>{参数名}</code></td><td>该语言的字面量：数字原样、字符串加引号、布尔按语言（Python 用 <code>True/False</code>）、<code>number/boolean</code> 型空值用 <code>0</code></td></tr>
+  <tr><td><code>{&参数名}</code></td><td>原样插入文本（自己书写表达式）</td></tr>
+</table>
+<p>翻译解析优先级（<code>CodeModeBlocks.toCode(blockType, lang)</code>）：<strong>① 内联 <code>code</code>/<code>codeFn</code> → ② 扩展 <code>code_exp</code> → ③ 内置映射表 → ④ 通用桥 <code>run_block</code> → ⑤ 说明注释</strong>。</p>
+<p>没有注册 <code>code</code> 也没有 <code>code_exp</code> 的积木会自动走通用桥，三语言都能真实执行：</p>
+<pre><code># Python
+run_block("mb_led_on", "pattern", "09990")
+// JavaScript
+run_block("mb_led_on", "pattern", "09990")
+; ALB（前缀式变参调用）
+(run_block "mb_led_on" "pattern" "09990")</code></pre>
+<p>配套可直接调用的运行时 API（三语言同名，由 <code>CodeRuntime</code> 注入）：</p>
+<table>
+  <tr><th>分组</th><th>可用名称</th></tr>
+  <tr><td>积木</td><td><code>run_block(type, key, val, ...)</code></td></tr>
+  <tr><td>数学</td><td><code>math_abs / floor / ceil / round / sqrt / sign / sin / cos / tan / asin / acos / atan / atan2 / exp / log / log2 / log10 / min / max / clamp / lerp / pi / e</code></td></tr>
+  <tr><td>文本</td><td><code>str_len / upper / lower / trim / repeat / replace / contains / index_of / letter / sub / of / newline</code>、<code>num_of</code></td></tr>
+  <tr><td>积木变量与列表</td><td><code>blk_var / blk_set_var</code>、<code>blk_list_len / get / push / insert / set / delete / clear / has / index / join / reverse / sort</code>（索引从 1 开始，与积木一致）</td></tr>
+  <tr><td>时间与侦测</td><td><code>answer / username / timestamp / current_time / format_time / sprite_direction / sprite_size</code></td></tr>
+  <tr><td>流程</td><td><code>sleep(sec)</code> 阻塞等待、<code>schedule(sec, "代码字符串")</code> 延时执行、<code>stop_all()</code> 停止运行</td></tr>
+</table>
+<p><strong>不可转换的三类积木</strong>会生成带说明的注释而不是代码：事件帽积木（<code>hat</code>，代码模式逐帧执行本身就不需要入口）、含子代码槽的积木（<code>c-block</code> / <code>c-block-reporter</code>，请用语言原生循环/条件）、参数中含积木引用（<code>type: 'block'</code>）的积木。</p>
+<p><strong>异步回报积木的取值语义</strong>：代码模式的 JS/ALB 帧是同步执行的，<code>run_block</code> 对异步积木<em>本帧返回上一帧的完成结果</em>（首帧为空值），副作用仍在调用时立即发生。需要精确等待完成时请改用积木模式或 <code>schedule</code>。</p>
+
 
 <h2>4. JSON 格式完整示例</h2>
 <pre><code>{
@@ -195,22 +283,71 @@ ExtensionManager.registerExtension({
 // 可以在文件中初始化状态
 window.__gameScore = 0;</code></pre>
 
+<h2>5.1 Python 格式扩展（.py）</h2>
+<p>积木执行器也可以用 <strong>Python</strong> 编写（由内置 <code>Skulpt</code> 解释器执行）。文件以 <code>.py</code> 结尾，在扩展创作模式里新建文件名以 <code>.py</code> 结尾即可得到模板；写代码时先 <code>def</code> 执行函数，最后调用宿主注入的 <code>register_extension({...})</code>（无需 import）。</p>
+
+<h3>Python 扩展模板</h3>
+<pre><code># 积木执行器用 def 编写, register_extension 必须写在所有 def 之后
+# 执行器接收两个 dict: params（积木参数）与 scope（执行上下文）, 返回值即 reporter 结果
+def ext_say(params, scope):
+    say(params["text"])                      # 直接调用舞台 API
+    print("扩展被调用: " + str(params["text"]))
+
+def ext_add(params, scope):
+    return params["a"] + params["b"]
+
+register_extension({
+    "id": "pydemo",
+    "name": "Python 测试扩展",
+    "color": "#FF6B6B",
+    "blocks": [
+        {"type": "ext_say", "label": "说 {text}", "shape": "stack",
+         "params": [ {"name": "text", "type": "string", "default": "你好"} ],
+         "code_exp": { "python": "say_it", "ALB": "say_it", "JavaScript": "sayIt" }},
+        {"type": "ext_add", "label": "{a} 加 {b}", "shape": "reporter",
+         "params": [ {"name": "a", "type": "number", "default": 1},
+                     {"name": "b", "type": "number", "default": 1} ]},
+    ],
+    "executors": {
+        "ext_say": ext_say,
+        "ext_add": ext_add,
+    },
+})</code></pre>
+
+<h3>Python 执行器约定</h3>
+<ul>
+  <li>✅ 执行器签名固定为 <code>def fn(params, scope)</code>，两个参数都是字典（<code>params</code> 为积木输入参数，<code>scope</code> 为执行上下文如循环变量 <code>scope["__i"]</code>）</li>
+  <li>✅ 可直接调用舞台 API：<code>say / show / hide / move / turn_right / goto_xy / set_x / get_x / key_pressed / mouse_x / set_sprite / set_var / get_var ...</code></li>
+  <li>✅ <code>reporter</code> 积木直接 <code>return</code> 值；<code>boolean</code> 积木 <code>return True/False</code>；<code>stack</code> 积木无需 return</li>
+  <li>✅ <code>print(...)</code> 输出到开发者工具控制台（前缀 <code>[Python 扩展]</code>），报错会带（与源文件一致的）Python 行号</li>
+  <li>✅ <code>code_exp</code> 属性同样生效，代码编程模式里可按命名空间对象调用（如 <code>h.say_it("你好")</code>）</li>
+  <li>⚠️ 一个 <code>.py</code> 文件可多次调用 <code>register_extension</code> 注册多个扩展</li>
+  <li>⚠️ 文件必须使用 UTF-8 编码；字典键必须是字符串</li>
+  <li>❌ <strong>导出的 HTML / EXE 作品不含 Python 解释器</strong>，Python 积木在导出页面中不会运行（导出时会弹窗提醒并跳过），需要网页发布请改用 JS / JSON 扩展</li>
+  <li>❌ C 型积木的子代码槽在 Python 执行器中无法执行（无法 <code>await</code>）</li>
+</ul>
+
+<div class="tip">
+  <strong>提示：</strong>Python 扩展与 JS 扩展可以混用：同一个项目 <code>extensions/</code> 目录里 <code>.json</code> / <code>.js</code> / <code>.py</code> 都会被自动加载到扩展可用池。
+</div>
+
 <h2>6. 加载扩展</h2>
 <h3>方式一：手动加载</h3>
-<p>点击工具栏的 <strong>🧩 扩展</strong> 按钮，选择 <code>.json</code> 或 <code>.js</code> 文件即可。</p>
+<p>点击工具栏的 <strong>🧩 扩展</strong> 按钮，选择 <code>.json</code> / <code>.js</code> / <code>.py</code> 文件即可。</p>
 
 <h3>方式二：项目自动加载</h3>
-<p>将扩展文件放在项目的 <code>extensions/</code> 目录下，打开项目时会自动加载所有 <code>.json</code> 和 <code>.js</code> 文件。</p>
+<p>将扩展文件放在项目的 <code>extensions/</code> 目录下，打开项目时会自动加载所有 <code>.json</code>、<code>.js</code> 和 <code>.py</code> 文件。</p>
 
-<h2>7. JSON vs JS 格式对比</h2>
+<h2>7. 三种格式对比</h2>
 <table>
-  <tr><th>特性</th><th>JSON 格式</th><th>JS 格式</th></tr>
-  <tr><td>执行器写法</td><td>函数字符串（需转义）</td><td>直接写函数</td></tr>
-  <tr><td>多行函数</td><td>用 \n 拼接</td><td>直接换行</td></tr>
-  <tr><td>局部变量</td><td>不支持</td><td>支持闭包</td></tr>
-  <tr><td>初始化代码</td><td>不支持</td><td>支持</td></tr>
-  <tr><td>多扩展注册</td><td>不支持</td><td>支持</td></tr>
-  <tr><td>语法检查</td><td>运行时</td><td>编辑器可检查</td></tr>
+  <tr><th>特性</th><th>JSON 格式</th><th>JS 格式</th><th>Python 格式</th></tr>
+  <tr><td>执行器写法</td><td>函数字符串（需转义）</td><td>直接写函数</td><td>直接写 <code>def</code></td></tr>
+  <tr><td>多行函数</td><td>用 \n 拼接</td><td>直接换行</td><td>直接换行（缩进 4 空格）</td></tr>
+  <tr><td>局部变量</td><td>不支持</td><td>支持闭包</td><td>支持模块级变量</td></tr>
+  <tr><td>初始化代码</td><td>不支持</td><td>支持</td><td>支持（顶层代码）</td></tr>
+  <tr><td>多扩展注册</td><td>不支持</td><td>支持</td><td>支持</td></tr>
+  <tr><td>语法检查</td><td>运行时</td><td>编辑器可检查</td><td>运行时（含行号）</td></tr>
+  <tr><td>导出 HTML/EXE</td><td>支持</td><td>支持</td><td><strong>不支持</strong>（不含解释器）</td></tr>
 </table>
 
 <h2>8. 可用全局对象</h2>

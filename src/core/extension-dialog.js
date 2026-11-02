@@ -174,7 +174,7 @@ const ExtensionDialog = (function () {
         try {
           const extDir = EditorState.projectPath + '/extensions';
           await window.api.ensureDir(extDir);
-          const ext = filePath.endsWith('.js') ? '.js' : '.json';
+          const ext = filePath.endsWith('.js') ? '.js' : (filePath.endsWith('.py') ? '.py' : '.json');
           const content = await window.api.readFile(filePath);
           if (content) {
             await window.api.writeFile(extDir + '/' + result.id + ext, content);
@@ -204,7 +204,7 @@ const ExtensionDialog = (function () {
       // 从项目 extensions 目录删除文件
       if (typeof EditorState !== 'undefined' && EditorState.projectPath) {
         const extDir = EditorState.projectPath + '/extensions';
-        ['.json', '.js'].forEach(ext => {
+        ['.json', '.js', '.py'].forEach(ext => {
           const filePath = extDir + '/' + extId + ext;
           if (window.api && window.api.deleteFile) {
             window.api.deleteFile(filePath).catch(() => {});

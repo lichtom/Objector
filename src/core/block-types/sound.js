@@ -45,6 +45,7 @@
   BlockRegistry.register({
     type: 'sound_change_volume', category: 'sound', color: C,
     label: '音量增加 {val}', labelKey: 'blocks.sound.sound_change_volume', shape: 'stack',
+    code: { python: "set_volume(get_var(\"__snd_vol\", 100) + {val})", javascript: "set_volume(get_var(\"__snd_vol\", 100) + {val})", alb: "set_volume(get_var(\"__snd_vol\", 100) + {val})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'val', type: 'number', default: 10 }],
   });
@@ -52,6 +53,7 @@
   BlockRegistry.register({
     type: 'sound_get_volume', category: 'sound', color: C,
     label: '音量', labelKey: 'blocks.sound.sound_get_volume', shape: 'reporter',
+    code: { python: "get_var(\"__snd_vol\", 100)", javascript: "get_var(\"__snd_vol\", 100)", alb: "get_var(\"__snd_vol\", 100)" },
     ports: { flowIn: false, flowOut: false },
     params: [],
   });
@@ -61,6 +63,7 @@
 
     type: 'sound_load', category: 'sound', color: C,
     label: '加载声音文件 {path}', labelKey: 'blocks.sound.sound_load', shape: 'stack',
+    code: { python: "run_block(\"sound_load\", \"path\", {path})", javascript: "run_block(\"sound_load\", \"path\", {path})", alb: "run_block(\"sound_load\", \"path\", {path})" },
     ports: { flowIn: true, flowOut: true },
     params: [{ name: 'path', type: 'string', default: '' }],
   });

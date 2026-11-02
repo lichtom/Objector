@@ -66,11 +66,26 @@ const i18n = (function () {
       });
     },
 
-    /** 动态标签构建器（用于 getLabel 函数）
-     *  用法: var L = i18n.L;
-     *        L('定义函数 {name}', 'Define function {name}')
+    /** 从多语言映射中取当前语言的文本
+     *  map: { 'zh-CN': '…', en: '…', ja: '…' }（可只提供部分语言）
+     *  查找顺序: 当前 locale → locale 主语言段(en-US→en) → zh-CN → fallback
+     *  用于积木内联多语言注册: register({ label: '中文', labels: { en: 'English' } })
      */
-    L: function(zh, en) {
+    pick(map, fallback) {
+      if (!map || typeof map !== 'object') return fallback;
+      var v = map[_locale];
+      if (v === undefined) v = map[String(_locale).split('-')[0]];
+      if (v === undefined) v = map['zh-CN'];
+      return v !== undefined ? v : fallback;
+    },
+
+    /** 动态标签构建器（用于 getLabel 函数）
+     *  用法一: var L = i18n.L;  L('定义函数 {name}', 'Define function {name}')
+     *  用法二（多语言映射, 任意语言）:
+     *          L({ 'zh-CN': '定义函数 {name}', en: 'Define {name}', ja: '…' })
+     */
+    L: function (zh, en) {
+      if (zh && typeof zh === 'object') return i18n.pick(zh, en);
       return _locale === 'en' ? (en || zh) : zh;
     },
   };

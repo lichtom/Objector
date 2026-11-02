@@ -1407,13 +1407,22 @@ function stopRun() {
       }
     } catch(e) { console.warn('[HTML导出] 获取精灵失败:', e.message); }
     var extExecs = {};
+    var pyExtSkipped = 0;
     try {
       if (typeof ExtensionManager !== 'undefined' && ExtensionManager.getExecutors) {
         ExtensionManager.getExecutors().forEach(function(fn, type) {
+          // Python 扩展执行器需要 Skulpt 解释器, 导出页面内无法运行 → 跳过重建（fn.toString() 只能拿到 JS 包装壳）
+          if (fn && fn.__extLang === 'python') { pyExtSkipped++; return; }
           try { extExecs[type] = fn.toString(); } catch(e) {}
         });
       }
     } catch(e) {}
+    if (pyExtSkipped > 0) {
+      console.warn('[HTML导出] 已跳过 ' + pyExtSkipped + ' 个 Python 扩展执行器（导出页面无 Python 解释器）');
+      alert(i18n.isEnglish()
+        ? 'Note: ' + pyExtSkipped + ' Python extension block(s) cannot run in the exported HTML (no Python interpreter embedded). Use JS/JSON extensions for web export.'
+        : '注意: ' + pyExtSkipped + ' 个 Python 扩展积木在导出的 HTML 中无法运行（导出页面不含 Python 解释器）。如需网页/EXE 发布, 请改用 JS 或 JSON 扩展。');
+    }
     var extJsSrcs = [];
     try {
       if (typeof ExtensionManager !== 'undefined' && ExtensionManager.getJsSources) {
