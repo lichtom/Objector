@@ -166,6 +166,10 @@
   <script>
     const { ipcRenderer } = require('electron');
 
+    // 阻止 Electron 默认的拖放行为（防止文件拖入替换页面）
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => e.preventDefault());
+
     let _spriteIdx = -1;
     let _dirty = false;
     let cm = null;

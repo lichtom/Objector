@@ -208,16 +208,21 @@ const SceneTree = (function () {
 
   /** 选中节点 */
   function selectNode(id) {
-    // 保存当前节点的代码
-    const prevId = SceneGraph.getSelectedId();
-    if (prevId && typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
-      const prevNode = SceneGraph.getNode(prevId);
-      const editor = EditorApp.getJsEditor();
-      if (prevNode && editor) {
-        if (prevNode.type === 'Sprite2D') {
-          EditorApp.setSpriteScript(prevNode.spriteRef, editor.getValue());
-        } else if (EditorApp.setNodeScript) {
-          EditorApp.setNodeScript(prevId, editor.getValue());
+    // 标签页系统活跃时，不操作共享的 CodeMirror 编辑器（防止覆盖标签页的代码）
+    const tabsActive = typeof EditorApp !== 'undefined' && EditorApp._hasActiveTabs && EditorApp._hasActiveTabs();
+
+    // 保存当前节点的代码（仅在无标签页时）
+    if (!tabsActive) {
+      const prevId = SceneGraph.getSelectedId();
+      if (prevId && typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
+        const prevNode = SceneGraph.getNode(prevId);
+        const editor = EditorApp.getJsEditor();
+        if (prevNode && editor) {
+          if (prevNode.type === 'Sprite2D') {
+            EditorApp.setSpriteScript(prevNode.spriteRef, editor.getValue());
+          } else if (EditorApp.setNodeScript) {
+            EditorApp.setNodeScript(prevId, editor.getValue());
+          }
         }
       }
     }
@@ -230,25 +235,24 @@ const SceneTree = (function () {
       Inspector.showNode(id);
     }
 
-    // 同步 StageManager 并加载脚本
+    // 同步 StageManager（标签页模式下也需同步精灵属性，但不切换活跃精灵以免覆盖编辑器积木）
     const node = SceneGraph.getNode(id);
     if (!node) return;
 
     if (node.type === 'Sprite2D' && typeof StageManager !== 'undefined') {
       StageManager.syncFromSceneGraph();
-      if (node.spriteRef !== null) {
+      if (!tabsActive && node.spriteRef !== null) {
         StageManager.setActiveSprite(node.spriteRef);
       }
     }
 
-    // 加载对应脚本（精灵用 spriteRef，其他节点用 nodeId）
-    if (typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
+    // 加载对应脚本（仅在无标签页时操作 CodeMirror）
+    if (!tabsActive && typeof EditorApp !== 'undefined' && EditorApp.getJsEditor) {
       const editor = EditorApp.getJsEditor();
       if (editor) {
         let script;
         if (node.type === 'Sprite2D') {
           script = EditorApp.getSpriteScript(node.spriteRef) || '// 在此编写 JavaScript 代码\n';
-          // 先设置编辑器关联的精灵索引，再 setValue，这样 change handler 能正确保存
           if (EditorApp.setEditorSpriteIdx) EditorApp.setEditorSpriteIdx(node.spriteRef);
         } else if (EditorApp.getNodeScript) {
           script = EditorApp.getNodeScript(id) || '// 在此编写 JavaScript 代码\n';
@@ -286,10 +290,13 @@ const SceneTree = (function () {
     const isRoot = !node.parent;
     const typeInfo = SceneGraph.getNodeType(node.type);
     const canAddChild = typeInfo && typeInfo.canAddChild;
+    const isSprite = node.type === 'Sprite2D';
 
     menu.innerHTML = `
       ${canAddChild ? '<div class="ctx-item" data-action="add-child">➕ 添加子节点</div>' : ''}
       <div class="ctx-item" data-action="rename">✏️ 重命名</div>
+      ${isSprite ? '<div class="ctx-item" data-action="create-script">📝 编辑脚本</div>' : ''}
+      <div class="ctx-item" data-action="show-properties">⚙️ 设置属性</div>
       <div class="ctx-item" data-action="duplicate">📋 复制（含子节点）</div>
       ${!isRoot ? '<div class="ctx-item" data-action="move-up">⬆️ 上移</div>' : ''}
       ${!isRoot ? '<div class="ctx-item" data-action="move-down">⬇️ 下移</div>' : ''}
@@ -332,6 +339,26 @@ const SceneTree = (function () {
           // 同步 StageManager
           if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
           refresh();
+        }
+        break;
+      }
+      case 'create-script': {
+        // 高级模式：在主编辑器中间区域打开脚本标签页（积木 + JS）
+        selectNode(nodeId);
+        if (typeof EditorApp !== 'undefined' && EditorApp.openSpriteScriptEditor) {
+          const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
+          const idx = sprites.findIndex(s => s._sceneNodeId === nodeId);
+          const name = node ? node.name : '精灵';
+          if (idx >= 0) {
+            EditorApp.openSpriteScriptEditor(idx, name);
+          }
+        }
+        break;
+      }
+      case 'show-properties': {
+        // 打开属性标签页
+        if (typeof EditorApp !== 'undefined' && EditorApp.openNodeProperties) {
+          EditorApp.openNodeProperties(nodeId, node.name);
         }
         break;
       }

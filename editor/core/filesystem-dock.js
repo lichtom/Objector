@@ -258,6 +258,12 @@ const FileSystemDock = (function () {
         return;
       }
       console.log('[FileSystem] 打开场景文件:', filePath);
+
+      // 1. 保存当前场景状态（积木 + 脚本 + 代码）
+      if (typeof EditorApp !== 'undefined' && EditorApp.saveCurrentSceneState) {
+        await EditorApp.saveCurrentSceneState();
+      }
+
       const content = await window.api.readFile(filePath);
       if (content === null || content === undefined) {
         alert('场景文件不存在: ' + filePath);
@@ -267,31 +273,52 @@ const FileSystemDock = (function () {
         alert('场景文件为空，请先保存场景后再打开');
         return;
       }
+
+      // 提取场景名（从文件路径中提取）
+      const sceneName = filePath.replace(/[\\/]+$/, '').split(/[\\/]/).pop().replace(/\.scene\.json$/, '');
+
       const sceneData = JSON.parse(content);
       if ((sceneData.rootId || sceneData.nodes) && typeof SceneGraph !== 'undefined') {
         SceneGraph.fromJSON(sceneData);
+        // 更新当前场景名
+        if (typeof EditorState !== 'undefined') EditorState._currentSceneName = sceneName;
         if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+        // 从场景文件加载积木到 _spriteBlocks（独立于 sprite 对象）
+        if (typeof EditorApp !== 'undefined' && EditorApp._loadBlocksFromSceneData) {
+          EditorApp._loadBlocksFromSceneData(sceneData);
+        }
         if (typeof SceneTree !== 'undefined') SceneTree.refresh();
         if (typeof Inspector !== 'undefined') {
           const root = SceneGraph.getRoot();
           if (root) Inspector.showNode(root.id);
         }
 
-        // 3D 和 UI 场景仅支持 JS 脚本，隐藏积木 tab 并自动切换到 JS
-        if (typeof SceneGraph !== 'undefined' && SceneGraph.isJsOnly && SceneGraph.isJsOnly()) {
-          const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
-          const jsTab = document.querySelector('.script-tab[data-tab="js"]');
-          if (blocksTab) blocksTab.classList.add('hidden');
-          if (jsTab && !jsTab.classList.contains('active')) jsTab.click();
+        // 1.5 清空标签页状态（旧场景的精灵索引不再有效）
+        if (typeof EditorApp !== 'undefined' && EditorApp._clearTabsOnSceneSwitch) {
+          EditorApp._clearTabsOnSceneSwitch();
+        }
 
+        // 2. 加载新场景的 JS 脚本
+        if (typeof EditorApp !== 'undefined' && EditorApp.loadSceneScripts) {
+          await EditorApp.loadSceneScripts(sceneName);
+        }
+
+        // 刷新积木画布和调色板
+        if (typeof Palette !== 'undefined') Palette.init();
+        setTimeout(() => {
+          if (typeof EditorCanvas !== 'undefined') {
+            EditorCanvas.resize();
+            EditorCanvas.render();
+          }
+        }, 100);
+
+        // 3D 和 UI 场景仅支持 JS 脚本
+        if (typeof SceneGraph !== 'undefined' && SceneGraph.isJsOnly && SceneGraph.isJsOnly()) {
           // 3D 场景：同步 Mesh3D 节点到 Three.js 渲染
           const sceneType = SceneGraph.getSceneType ? SceneGraph.getSceneType() : null;
           if (sceneType === 'Scene3D' && typeof Stage3D !== 'undefined' && Stage3D.isInitialized && Stage3D.isInitialized()) {
             Stage3D.syncMeshesFromSceneGraph();
           }
-        } else {
-          const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
-          if (blocksTab) blocksTab.classList.remove('hidden');
         }
 
         document.getElementById('status-text').textContent = '已加载场景: ' + (sceneData.name || filePath);

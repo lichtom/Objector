@@ -390,7 +390,7 @@ window.EditorApp = (function () {
     if (_panelsOpened) { console.log('[Panel] already opened, skip'); return; }
     if (!window.api || !window.api.openPanels) { console.warn('[Panel] API not available'); return; }
     const _pm0 = EditorState.projectMode || 'normal';
-    if (_pm0 !== 'normal' && _pm0 !== 'advanced' && !_pm0.startsWith('code-')) { console.log('[Panel] mode ' + _pm0 + ' 不打开面板, skip'); return; }
+    if (_pm0 !== 'normal' && _pm0 !== 'advanced' && _pm0 !== 'extension' && !_pm0.startsWith('code-')) { console.log('[Panel] mode ' + _pm0 + ' 不打开面板, skip'); return; }
     console.log('[Panel] Opening panels...');
     window.api.openPanels().then(() => {
       _panelsOpened = true;
@@ -1066,10 +1066,34 @@ window.EditorApp = (function () {
   // 高级模式 (Godot-style) 初始化
   // ============================================================
   let _codeMirrorInstance = null;
-  let _spriteScripts = {}; // index -> JS code
-  let _nodeScripts = {};   // nodeId -> JS code（非 Sprite2D 节点的脚本）
+  let _spriteScripts = {}; // scene -> { index -> JS code }  按场景存储
+  let _spriteBlocks = {};  // scene -> { index -> blocks }  按场景存储（像JS代码一样独立于sprite对象）
+  let _nodeScripts = {};   // scene -> { nodeId -> JS code }  按场景存储
   let _advancedInitialized = false;
   let _editorSpriteIdx = -1;  // 当前编辑器关联的精灵索引（不依赖 SceneGraph 选中状态）
+  let _jsSaveTimer = null;    // JS 防抖保存定时器（模块级，切换标签时可清除）
+
+  // ========== 精灵标签页系统 ==========
+  let _spriteTabs = [];       // [{spriteIdx, spriteName}]
+  let _activeTabIdx = -1;     // 当前激活的标签页索引
+  let _currentSubTab = 'blocks'; // 当前子标签: 'blocks' | 'js'
+
+  /** 获取当前场景名（用于存储 key） */
+  function _curScene() {
+    return (typeof EditorState !== 'undefined' && EditorState._currentSceneName) ? EditorState._currentSceneName : 'main';
+  }
+  /** 获取当前场景的精灵脚本对象 */
+  function _getSceneScripts() {
+    const s = _curScene();
+    if (!_spriteScripts[s]) _spriteScripts[s] = {};
+    return _spriteScripts[s];
+  }
+  /** 获取当前场景的节点脚本对象 */
+  function _getSceneNodeScripts() {
+    const s = _curScene();
+    if (!_nodeScripts[s]) _nodeScripts[s] = {};
+    return _nodeScripts[s];
+  }
 
   /** 设置编辑器当前关联的精灵索引（供 SceneTree.selectNode 调用） */
   function setEditorSpriteIdx(idx) { _editorSpriteIdx = idx; }
@@ -1084,7 +1108,7 @@ window.EditorApp = (function () {
     const advancedLayout = document.getElementById('advanced-layout');
     if (!mainLayout || !advancedLayout) return;
 
-    // 先将面板恢复到 main-layout（可能被 MC 模式或其他模式移走了）
+    // 将面板恢复到 main-layout（可能被 MC 模式或其他模式移走了）
     const palettePanel = document.getElementById('palette-panel');
     const editorPanel = document.getElementById('editor-panel');
     if (palettePanel && palettePanel.parentNode !== mainLayout) {
@@ -1098,29 +1122,19 @@ window.EditorApp = (function () {
     mainLayout.classList.add('hidden');
     advancedLayout.classList.remove('hidden');
 
-    // 将积木面板和编辑器面板移入脚本区域
-    const editorCanvas = document.getElementById('editor-canvas');
+    // 将 palette 和 editor 移入 script-blocks-content
     const blocksContent = document.getElementById('script-blocks-content');
     if (palettePanel && blocksContent) blocksContent.appendChild(palettePanel);
     if (editorPanel && blocksContent) blocksContent.appendChild(editorPanel);
 
     // 舞台和输出使用独立面板窗口（与普通模式相同）
-    _lastStageJSON = '';  // 重置脏检查，确保初始数据能推送到面板
+    _lastStageJSON = '';
     _initPanels();
-
-    // 画布移入新容器后，重新计算尺寸
-    setTimeout(() => {
-      if (typeof EditorCanvas !== 'undefined') {
-        EditorCanvas.resize();
-        EditorCanvas.render();
-      }
-    }, 50);
 
     // 初始化 SceneGraph（场景图核心）
     const renderMode = (typeof EditorState !== 'undefined' && EditorState.renderMode) || '2d';
     if (typeof SceneGraph !== 'undefined') {
       SceneGraph.init(renderMode);
-      // 同步到 StageManager
       if (typeof StageManager !== 'undefined') {
         StageManager.syncFromSceneGraph();
       }
@@ -1131,9 +1145,17 @@ window.EditorApp = (function () {
     if (typeof Inspector !== 'undefined') Inspector.init();
     if (typeof FileSystemDock !== 'undefined') FileSystemDock.init();
 
-    // 初始化 CodeMirror
+    // 初始化积木画布
+    setTimeout(() => {
+      if (typeof EditorCanvas !== 'undefined') {
+        EditorCanvas.resize();
+        EditorCanvas.render();
+      }
+    }, 100);
+
+    // 初始化 CodeMirror（JS 代码编辑器）
     const jsEditorEl = document.getElementById('js-editor');
-    if (jsEditorEl && typeof CodeMirror !== 'undefined') {
+    if (jsEditorEl && typeof CodeMirror !== 'undefined' && !_codeMirrorInstance) {
       _codeMirrorInstance = CodeMirror(jsEditorEl, {
         mode: 'javascript',
         theme: 'material-darker',
@@ -1142,201 +1164,45 @@ window.EditorApp = (function () {
         indentWithTabs: false,
         matchBrackets: true,
         autoCloseBrackets: true,
-        value: '// 在此编写 JavaScript 代码\n// 可用对象：sprite（当前角色）、globalVars（全局变量）\n// 示例：\n// sprite.x = 100;\n// sprite.say("Hello!");\n',
+        value: '// 在此编写 JavaScript 代码\n// 可用对象：sprite（当前角色）、globalVars（全局变量）\n',
       });
-      // 实时保存代码：使用 _editorSpriteIdx 跟踪（不依赖 SceneGraph 选中状态）
+      // 实时保存 JS 代码到当前标签页的精灵
       _codeMirrorInstance.on('change', () => {
-        const selId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
-
-        if (_editorSpriteIdx >= 0) {
-          _spriteScripts[_editorSpriteIdx] = _codeMirrorInstance.getValue();
-        } else if (selId) {
-          _nodeScripts[selId] = _codeMirrorInstance.getValue();
-        }
-      });
-    }
-
-    // 脚本 tab 切换
-    const scriptTabs = document.querySelectorAll('.script-tab');
-    scriptTabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        scriptTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const tabName = tab.dataset.tab;
-        document.getElementById('script-blocks-content').classList.toggle('hidden', tabName !== 'blocks');
-        document.getElementById('script-js-content').classList.toggle('hidden', tabName !== 'js');
-        if (tabName === 'js' && _codeMirrorInstance) {
-          _codeMirrorInstance.refresh();
-        }
-      });
-    });
-
-    // 3D 和 UI 场景仅支持 JS 脚本，隐藏积木 tab
-    if (typeof SceneGraph !== 'undefined' && SceneGraph.isJsOnly && SceneGraph.isJsOnly()) {
-      const blocksTab = document.querySelector('.script-tab[data-tab="blocks"]');
-      const jsTab = document.querySelector('.script-tab[data-tab="js"]');
-      if (blocksTab) blocksTab.classList.add('hidden');
-      if (jsTab) jsTab.click();
-    }
-
-    // ⧉ 新窗口编辑代码（支持任意节点类型）
-    const popoutBtn = document.getElementById('btn-popout-js');
-    if (popoutBtn && window.api && window.api.openJsEditor) {
-      popoutBtn.addEventListener('click', () => {
-        // 获取当前选中节点
-        const selId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
-        const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
-
-        if (!selId) {
-          alert('请先在场景树中选择一个节点');
-          return;
-        }
-
-        const node = (typeof SceneGraph !== 'undefined') ? SceneGraph.getNode(selId) : null;
-        const isSprite = node && node.type === 'Sprite2D';
-        const name = node ? node.name : '脚本';
-
-        // 先保存当前编辑器内容
-        if (_codeMirrorInstance) {
-          // 精灵节点用 spriteIdx，其他节点用 nodeId
-          if (isSprite && selIdx >= 0) {
-            EditorApp.setSpriteScript(selIdx, _codeMirrorInstance.getValue());
-          } else {
-            _nodeScripts[selId] = _codeMirrorInstance.getValue();
+        if (_activeTabIdx < 0) return;
+        const tab = _spriteTabs[_activeTabIdx];
+        if (!tab) return;
+        const sp = _getSceneScripts();
+        sp[tab.spriteIdx] = _codeMirrorInstance.getValue();
+        clearTimeout(_jsSaveTimer);
+        _jsSaveTimer = setTimeout(() => {
+          if (EditorState.projectMode === 'advanced' && EditorState.projectPath) {
+            _saveSceneJsScripts();
           }
-        }
+        }, 1500);
+      });
+    }
 
-        // 获取代码：优先用节点 ID 存储，回退到精灵索引
-        let code;
-        if (_nodeScripts[selId] !== undefined) {
-          code = _nodeScripts[selId];
-        } else if (isSprite && selIdx >= 0) {
-          code = _spriteScripts[selIdx] || '// 在此编写 JavaScript 代码\n';
+    // 子标签切换（积木 / JS）
+    const subTabBtns = document.querySelectorAll('#sprite-script-tabs .script-tab');
+    subTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        _currentSubTab = btn.dataset.tab;
+        subTabBtns.forEach(t => t.classList.toggle('active', t === btn));
+        const blocksEl = document.getElementById('script-blocks-content');
+        const jsEl = document.getElementById('script-js-content');
+        if (_currentSubTab === 'blocks') {
+          if (blocksEl) blocksEl.classList.remove('hidden');
+          if (jsEl) jsEl.classList.add('hidden');
+          setTimeout(() => {
+            if (typeof EditorCanvas !== 'undefined') { EditorCanvas.resize(); EditorCanvas.render(); }
+          }, 50);
         } else {
-          code = '// 在此编写 JavaScript 代码\n';
+          if (blocksEl) blocksEl.classList.add('hidden');
+          if (jsEl) jsEl.classList.remove('hidden');
+          if (_codeMirrorInstance) setTimeout(() => _codeMirrorInstance.refresh(), 50);
         }
-
-        // 传递 nodeId 和 spriteIdx 用于回调识别
-        window.api.openJsEditor({
-          spriteIdx: selId,  // 用节点 ID 作为标识
-          name: name + '.js',
-          code: code
-        });
       });
-
-      // 监听外部窗口保存的代码
-      window.api.onJsEditorCodeUpdated((nodeId, code) => {
-        // 判断是精灵节点还是其他节点
-        const node = (typeof SceneGraph !== 'undefined') ? SceneGraph.getNode(nodeId) : null;
-        const isSprite = node && node.type === 'Sprite2D';
-        const selIdx = (typeof SceneTree !== 'undefined') ? SceneTree.getSelectedIndex() : -1;
-
-        if (isSprite && selIdx >= 0) {
-          _spriteScripts[selIdx] = code;
-        } else {
-          _nodeScripts[nodeId] = code;
-        }
-
-        // 如果当前正在编辑这个节点，同步到内嵌编辑器
-        const curSelId = (typeof SceneGraph !== 'undefined') ? SceneGraph.getSelectedId() : null;
-        if (curSelId === nodeId && _codeMirrorInstance) {
-          const cursor = _codeMirrorInstance.getCursor();
-          _codeMirrorInstance.setValue(code);
-          _codeMirrorInstance.setCursor(cursor);
-        }
-
-        const nodeName = node ? node.name : nodeId;
-        document.getElementById('status-text').textContent = '已保存代码: ' + nodeName;
-        console.log('[JS Editor] 外部窗口保存代码:', nodeName);
-      });
-    }
-
-    // ==================== 编辑器全屏功能 ====================
-    let _fsPanel = null;  // 当前全屏的面板
-    let _fsExitBtn = null;
-
-    function enterFullscreen(panel) {
-      if (_fsPanel) exitFullscreen();
-      panel.classList.add('panel-fullscreen');
-      // 保持 tab 栏可见，让用户自由切换积木/JS 模式
-      // 添加退出按钮
-      _fsExitBtn = document.createElement('button');
-      _fsExitBtn.className = 'fullscreen-exit';
-      _fsExitBtn.innerHTML = '<img src="../icons/窗口操作图标/关闭.svg" class="tb-icon" style="height:12px;margin:0;"> 退出全屏 (Esc)';
-      _fsExitBtn.addEventListener('click', exitFullscreen);
-      panel.appendChild(_fsExitBtn);
-      _fsPanel = panel;
-      // 刷新当前内容区域
-      _refreshContent();
-    }
-
-    function exitFullscreen() {
-      if (!_fsPanel) return;
-      _fsPanel.classList.remove('panel-fullscreen');
-      if (_fsExitBtn) { _fsExitBtn.remove(); _fsExitBtn = null; }
-      _fsPanel = null;
-      _refreshContent();
-    }
-
-    function _refreshContent() {
-      if (typeof EditorCanvas !== 'undefined' && EditorCanvas.resize) {
-        setTimeout(() => EditorCanvas.resize(), 50);
-      }
-      if (_codeMirrorInstance) setTimeout(() => _codeMirrorInstance.refresh(), 50);
-    }
-
-    // 单一全屏按钮
-    document.getElementById('btn-fs-editor')?.addEventListener('click', () => {
-      if (_fsPanel) {
-        exitFullscreen();
-      } else {
-        const panel = document.getElementById('script-editor-panel');
-        if (panel) enterFullscreen(panel);
-      }
     });
-
-    // Esc 退出全屏 / F11 切换全屏
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && _fsPanel) {
-        e.preventDefault();
-        exitFullscreen();
-      }
-      if (e.key === 'F11') {
-        e.preventDefault();
-        const panel = document.getElementById('script-editor-panel');
-        if (_fsPanel) {
-          exitFullscreen();
-        } else if (panel) {
-          enterFullscreen(panel);
-        }
-      }
-    });
-
-    // 窗口 resize 时刷新内容
-    window.addEventListener('resize', () => {
-      if (_fsPanel) _refreshContent();
-    });
-
-    // 分割条拖拽调整高度
-    const divider = document.getElementById('center-divider');
-    const scriptPanel = document.getElementById('script-editor-panel');
-    if (divider && scriptPanel) {
-      let dragging = false;
-      divider.addEventListener('mousedown', (e) => {
-        dragging = true;
-        e.preventDefault();
-      });
-      document.addEventListener('mousemove', (e) => {
-        if (!dragging) return;
-        const center = document.getElementById('advanced-center');
-        if (!center) return;
-        const rect = center.getBoundingClientRect();
-        const newHeight = rect.bottom - e.clientY;
-        scriptPanel.style.height = Math.max(120, Math.min(newHeight, rect.height - 200)) + 'px';
-        if (_codeMirrorInstance) _codeMirrorInstance.refresh();
-      });
-      document.addEventListener('mouseup', () => { dragging = false; });
-    }
 
     // 自动选中第一个节点
     setTimeout(() => {
@@ -2010,7 +1876,7 @@ window.EditorApp = (function () {
 
   /**
    * 把所有角色的代码落盘（返回是否成功）:
-   *  ① 每个角色独立文件 code/<角色名>.<py|js|alb> —— 可外部编辑, 单文件写入互不干扰
+   *  ① 每个角色独立文件 scripts/<场景名>/<角色名>.<py|js|alb> —— 按场景存储
    *  ② project.json 的 config.codeScripts —— 兼容导出/旧加载链路
    */
   async function _persistCodeScripts() {
@@ -2018,8 +1884,9 @@ window.EditorApp = (function () {
     if (!_codeScriptsRestored) return false; // 磁盘代码尚未恢复, 禁止回写（防模板覆盖用户代码）
     try {
       const all = getAllCodeScripts();
-      // 1) 每角色独立代码文件
-      const codeDir = EditorState.projectPath + '/code';
+      // 1) 每角色独立代码文件 —— 按场景存储到 scripts/<sceneName>/
+      const sceneName = (typeof EditorState !== 'undefined' && EditorState._currentSceneName) ? EditorState._currentSceneName : 'main';
+      const codeDir = EditorState.projectPath + '/scripts/' + sceneName;
       if (window.api.ensureDir) await window.api.ensureDir(codeDir);
       const writes = [];
       Object.keys(all).forEach(name => {
@@ -2050,7 +1917,8 @@ window.EditorApp = (function () {
 
   /**
    * 在精灵恢复(会触发角色切换回调)之前, 从磁盘恢复按角色代码并打开落盘闸门:
-   * project.json 的 config.codeScripts → 再叠加 code/ 独立文件（文件是逐次自动保存的最新内容, 优先）
+   * project.json 的 config.codeScripts → 再叠加 scripts/<sceneName>/ 独立文件（文件是逐次自动保存的最新内容, 优先）
+   * 兼容旧版: 也尝试从 code/ 目录加载
    */
   async function _restoreCodeScriptsFromDisk(config, folder) {
     try {
@@ -2062,23 +1930,33 @@ window.EditorApp = (function () {
         if (n && n !== '舞台' && names.indexOf(n) < 0) names.push(n);
       });
       Object.keys(_codeScripts).forEach(k => { if (k !== '舞台' && names.indexOf(k) < 0) names.push(k); });
-      // 叠加 code/ 独立文件
+      // 加载场景名（用于构建脚本目录路径）
+      const sceneName = (config && config.mainScene) 
+        ? config.mainScene.replace(/^scenes\//, '').replace(/\.scene\.json$/, '') 
+        : 'main';
+      // 叠加 scripts/<sceneName>/ 独立文件（优先）和 code/ 独立文件（兼容旧版）
       if (window.api.listDir) {
-        const codeDir = folder + '/code';
-        const files = await window.api.listDir(codeDir);
         const extToRunner = { py: 'python', js: 'javascript', alb: 'alb' };
-        for (const f of files || []) {
-          const dot = f.lastIndexOf('.');
-          if (dot <= 0) continue;
-          const runner = extToRunner[f.slice(dot + 1).toLowerCase()];
-          if (!runner) continue;
-          const base = f.slice(0, dot);
-          const name = names.find(n => _safeCodeFileName(n) === base);
-          if (!name) continue;
-          const content = await window.api.readFile(codeDir + '/' + f);
-          if (content == null) continue;
-          if (!_codeScripts[name]) _codeScripts[name] = {};
-          _codeScripts[name][runner] = String(content);
+        const dirs = [
+          folder + '/scripts/' + sceneName,  // 新版: 按场景存储
+          folder + '/code',                   // 旧版: 兼容
+        ];
+        for (const codeDir of dirs) {
+          let files;
+          try { files = await window.api.listDir(codeDir); } catch { continue; }
+          for (const f of files || []) {
+            const dot = f.lastIndexOf('.');
+            if (dot <= 0) continue;
+            const runner = extToRunner[f.slice(dot + 1).toLowerCase()];
+            if (!runner) continue;
+            const base = f.slice(0, dot);
+            const name = names.find(n => _safeCodeFileName(n) === base);
+            if (!name) continue;
+            const content = await window.api.readFile(codeDir + '/' + f);
+            if (content == null) continue;
+            if (!_codeScripts[name]) _codeScripts[name] = {};
+            _codeScripts[name][runner] = String(content);
+          }
         }
       }
     } catch (e) {
@@ -2086,6 +1964,359 @@ window.EditorApp = (function () {
     } finally {
       _codeScriptsRestored = true; // 无论成败都打开闸门, 否则用户将永远存不了盘
     }
+  }
+
+  /**
+   * 场景切换钩子: 保存当前场景的所有状态（积木 + JS脚本 + 代码）
+   * 在切换场景前调用，确保当前场景数据不丢失
+   * 保存后清空内存中的积木，防止新场景加载时被旧数据覆盖
+   */
+  async function saveCurrentSceneState() {
+    if (!EditorState.projectPath) return;
+    try {
+      // 0. 必须先保存当前标签页数据（在 syncFromSceneGraph 重建精灵之前）
+      _saveCurrentTabData();
+      // 1. 将 _spriteBlocks 同步到 SceneGraph 节点（保存前确保场景文件包含正确的积木）
+      _syncBlocksToSceneGraph();
+      // 2. 同步精灵属性到 SceneGraph 并保存场景文件
+      if (typeof StageManager !== 'undefined' && StageManager.syncToSceneGraph) {
+        StageManager.syncToSceneGraph();
+      }
+      if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
+        const sceneName = (EditorState._currentSceneName) || 'main';
+        await FileSystemDock.saveCurrentScene(sceneName);
+      }
+      // 3. 高级模式: 保存 JS 脚本到场景目录
+      if (EditorState.projectMode === 'advanced') {
+        await _saveSceneJsScripts();
+      }
+      // 4. 代码模式: 保存代码到场景目录
+      if (_isCodeProjectMode()) {
+        _syncAllSpriteCode();
+        await _persistCodeScripts();
+      }
+    } catch (e) {
+      console.warn('[场景保存] 保存场景状态失败:', e);
+    }
+  }
+
+  /** 将 _spriteBlocks 同步到 SceneGraph 节点的 blocks 字段（保存场景文件前调用） */
+  function _syncBlocksToSceneGraph() {
+    if (typeof SceneGraph === 'undefined' || typeof StageManager === 'undefined') return;
+    const scene = _curScene();
+    const sceneBlocks = _spriteBlocks[scene] || {};
+    const sprites = StageManager.getSprites();
+    sprites.forEach((sprite, idx) => {
+      if (!sprite._sceneNodeId) return;
+      const node = SceneGraph.getNode(sprite._sceneNodeId);
+      if (!node) return;
+      if (sceneBlocks[idx] !== undefined) {
+        node.blocks = JSON.parse(JSON.stringify(sceneBlocks[idx]));
+      }
+    });
+  }
+
+  /** 从场景文件数据中提取积木到 _spriteBlocks（加载场景后调用） */
+  function _loadBlocksFromSceneData(sceneData) {
+    if (!sceneData || !sceneData.nodes) return;
+    const scene = _curScene();
+    if (!_spriteBlocks[scene]) _spriteBlocks[scene] = {};
+    const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
+    // 根据 SceneGraph 节点的 spriteRef 映射索引
+    Object.values(sceneData.nodes).forEach(node => {
+      if (node.type === 'Sprite2D' && node.spriteRef != null && node.blocks) {
+        _spriteBlocks[scene][node.spriteRef] = JSON.parse(JSON.stringify(node.blocks));
+      }
+    });
+    console.log('[场景加载] 已加载积木数据:', scene, '精灵数:', Object.keys(_spriteBlocks[scene]).length);
+  }
+
+  /** 是否有活跃的标签页（供 scene-tree.js 判断是否应跳过编辑器操作） */
+  function _hasActiveTabs() { return _spriteTabs.length > 0; }
+
+  /** 将 _spriteBlocks 中当前场景的积木写回精灵对象（运行前调用，确保 executor 能读到积木） */
+  function _flushBlocksToSprites() {
+    if (typeof StageManager === 'undefined') return;
+    const scene = _curScene();
+    // 先保存当前标签页的最新积木
+    _saveCurrentTabData();
+    const sceneBlocks = _spriteBlocks[scene] || {};
+    const sprites = StageManager.getSprites();
+    Object.keys(sceneBlocks).forEach(idxStr => {
+      const idx = parseInt(idxStr);
+      if (sprites[idx]) {
+        sprites[idx].blocks = JSON.parse(JSON.stringify(sceneBlocks[idx]));
+      }
+    });
+  }
+
+  /** 保存当前场景的 JS 脚本到 scripts/<sceneName>/ 目录 */
+  async function _saveSceneJsScripts() {
+    if (!EditorState.projectPath || !window.api || !window.api.writeFile || !window.api.ensureDir) return;
+    try {
+      const sceneName = (EditorState._currentSceneName) || 'main';
+      const scriptDir = EditorState.projectPath + '/scripts/' + sceneName;
+      await window.api.ensureDir(scriptDir);
+      const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
+      const sceneScripts = _getSceneScripts();
+      for (let i = 0; i < sprites.length; i++) {
+        if (sprites[i].isStage) continue;
+        const code = sceneScripts[i] || '';
+        if (code.trim()) {
+          const fileName = _safeCodeFileName(sprites[i].name) + '.js';
+          await window.api.writeFile(scriptDir + '/' + fileName, code);
+        }
+      }
+    } catch (e) {
+      console.warn('[JS脚本保存] 保存失败:', e);
+    }
+  }
+
+  /**
+   * 场景切换钩子: 加载新场景的 JS 脚本
+   * 在切换场景后调用，恢复新场景的脚本数据
+   */
+  async function loadSceneScripts(sceneName) {
+    if (!EditorState.projectPath || !window.api || !window.api.readFile || !window.api.listDir) return;
+    try {
+      const scriptDir = EditorState.projectPath + '/scripts/' + sceneName;
+      const files = await window.api.listDir(scriptDir).catch(() => []);
+      if (!files || files.length === 0) return;
+      // 初始化该场景的脚本存储
+      if (!_spriteScripts[sceneName]) _spriteScripts[sceneName] = {};
+      if (!_nodeScripts[sceneName]) _nodeScripts[sceneName] = {};
+      // 获取当前精灵列表以匹配文件名
+      const sprites = (typeof StageManager !== 'undefined') ? StageManager.getSprites() : [];
+      for (const f of files) {
+        if (!f.endsWith('.js')) continue;
+        const base = f.slice(0, -3);
+        const content = await window.api.readFile(scriptDir + '/' + f);
+        if (content == null) continue;
+        // 尝试匹配精灵名
+        const spriteIdx = sprites.findIndex(s => !s.isStage && _safeCodeFileName(s.name) === base);
+        if (spriteIdx >= 0) {
+          _spriteScripts[sceneName][spriteIdx] = String(content);
+        }
+      }
+      console.log('[场景加载] 已加载场景脚本:', sceneName, '文件数:', files.length);
+    } catch (e) {
+      console.warn('[场景加载] 加载场景脚本失败:', e);
+    }
+  }
+
+  /**
+   * 打开精灵脚本标签页（主编辑器中间区域，包含积木 + JS 两个子 tab）
+   * 通过右键菜单"编辑脚本"调用
+   * @param {number} spriteIdx - 精灵索引
+   * @param {string} spriteName - 精灵名称
+   */
+  function openSpriteScriptEditor(spriteIdx, spriteName) {
+    // 如果已有该精灵的脚本标签页，直接切换
+    const existingIdx = _spriteTabs.findIndex(t => t.tabType === 'script' && t.spriteIdx === spriteIdx);
+    if (existingIdx >= 0) {
+      _switchToTab(existingIdx);
+      return;
+    }
+    // 创建新标签页
+    _spriteTabs.push({ tabType: 'script', spriteIdx: spriteIdx, spriteName: spriteName || '精灵' });
+    _switchToTab(_spriteTabs.length - 1);
+  }
+
+  /**
+   * 打开节点属性标签页（主编辑器中间区域，显示 Inspector 内容）
+   * 通过右键菜单“设置属性”调用
+   * @param {string} nodeId - 场景图节点ID
+   * @param {string} nodeName - 节点名称
+   */
+  function openNodeProperties(nodeId, nodeName) {
+    // 如果已有该节点的属性标签页，直接切换
+    const existingIdx = _spriteTabs.findIndex(t => t.tabType === 'props' && t.nodeId === nodeId);
+    if (existingIdx >= 0) {
+      _switchToTab(existingIdx);
+      return;
+    }
+    // 创建新属性标签页
+    _spriteTabs.push({ tabType: 'props', nodeId: nodeId, nodeName: nodeName || '节点' });
+    _switchToTab(_spriteTabs.length - 1);
+  }
+  
+  // ========== 精灵标签页管理 ==========
+  
+  /** 保存当前标签页的编辑数据 */
+  function _saveCurrentTabData() {
+    if (_activeTabIdx < 0 || !_spriteTabs[_activeTabIdx]) return;
+    const tab = _spriteTabs[_activeTabIdx];
+    // 属性标签页不需要保存积木/JS数据
+    if (tab.tabType !== 'script') return;
+    const scene = _curScene();
+    // 保存积木到 _spriteBlocks（像JS代码一样按场景+索引独立存储）
+    if (!_spriteBlocks[scene]) _spriteBlocks[scene] = {};
+    _spriteBlocks[scene][tab.spriteIdx] = JSON.parse(JSON.stringify(EditorState.blocks || {}));
+    // 保存 JS 代码（change handler 已实时保存，这里兆底）
+    if (_codeMirrorInstance) {
+      const sp = _getSceneScripts();
+      sp[tab.spriteIdx] = _codeMirrorInstance.getValue();
+    }
+  }
+  
+  /** 切换到指定标签页 */
+  function _switchToTab(idx) {
+    if (idx < 0 || idx >= _spriteTabs.length) return;
+    // 清除 JS 防抖定时器（防止旧定时器在切换后触发写入错误数据）
+    clearTimeout(_jsSaveTimer);
+    // 保存当前标签页数据
+    _saveCurrentTabData();
+    // 切换激活标签
+    _activeTabIdx = idx;
+    const tab = _spriteTabs[idx];
+
+    // 显示编辑区域
+    _showEditingUI(true);
+    // 渲染标签栏
+    _renderSpriteTabs();
+
+    if (tab.tabType === 'script') {
+      // === 脚本标签页：恢复积木/JS ===
+      const scene = _curScene();
+      const sceneBlocks = _spriteBlocks[scene] || {};
+      EditorState.blocks = sceneBlocks[tab.spriteIdx]
+        ? JSON.parse(JSON.stringify(sceneBlocks[tab.spriteIdx]))
+        : {};
+      _editorSpriteIdx = tab.spriteIdx;
+      // 刷新画布
+      setTimeout(() => {
+        if (typeof EditorCanvas !== 'undefined') {
+          EditorCanvas.resize();
+          EditorCanvas.render();
+        }
+      }, 50);
+      // 刷新 CodeMirror
+      if (_codeMirrorInstance) {
+        const sp = _getSceneScripts();
+        const jsCode = sp[tab.spriteIdx] || ('// ' + tab.spriteName + ' 的脚本\n// 可用对象：sprite（当前角色）、globalVars（全局变量）\n\n');
+        _codeMirrorInstance.setValue(jsCode);
+        setTimeout(() => _codeMirrorInstance && _codeMirrorInstance.refresh(), 50);
+      }
+      // 刷新 Palette
+      if (typeof Palette !== 'undefined') {
+        try { Palette.init(); } catch(e) { /* ignore */ }
+      }
+      // 保持当前子标签可见性
+      _updateSubTabVisibility();
+    } else if (tab.tabType === 'props') {
+      // === 属性标签页：渲染 Inspector 内容 ===
+      _editorSpriteIdx = -1;
+      const container = document.getElementById('tab-inspector-content');
+      if (container && typeof Inspector !== 'undefined' && Inspector.renderInto) {
+        Inspector.renderInto(container, tab.nodeId);
+      }
+    }
+  }
+  
+  /** 关闭标签页 */
+  function _closeTab(idx) {
+    if (idx < 0 || idx >= _spriteTabs.length) return;
+    _spriteTabs.splice(idx, 1);
+    if (_spriteTabs.length === 0) {
+      _activeTabIdx = -1;
+      _showEditingUI(false);
+      _renderSpriteTabs();
+      EditorState.blocks = {};
+      if (_codeMirrorInstance) _codeMirrorInstance.setValue('');
+    } else if (_activeTabIdx >= _spriteTabs.length) {
+      _switchToTab(_spriteTabs.length - 1);
+    } else if (_activeTabIdx === idx) {
+      _switchToTab(Math.min(idx, _spriteTabs.length - 1));
+    } else if (_activeTabIdx > idx) {
+      _activeTabIdx--;
+      _renderSpriteTabs();
+    }
+  }
+  
+  /** 显示/隐藏编辑区域 */
+  function _showEditingUI(show) {
+    const scriptTabs = document.getElementById('sprite-script-tabs');
+    const blocksContent = document.getElementById('script-blocks-content');
+    const jsContent = document.getElementById('script-js-content');
+    const propsContent = document.getElementById('script-props-content');
+    const placeholder = document.getElementById('script-placeholder');
+    if (show) {
+      const tab = _spriteTabs[_activeTabIdx];
+      if (tab && tab.tabType === 'props') {
+        // 属性标签页：显示属性容器，隐藏积木/JS
+        if (scriptTabs) scriptTabs.classList.add('hidden');
+        if (blocksContent) blocksContent.classList.add('hidden');
+        if (jsContent) jsContent.classList.add('hidden');
+        if (propsContent) propsContent.classList.remove('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
+      } else {
+        // 脚本标签页：显示积木/JS，隐藏属性
+        if (scriptTabs) scriptTabs.classList.remove('hidden');
+        if (propsContent) propsContent.classList.add('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
+        _updateSubTabVisibility();
+      }
+    } else {
+      if (scriptTabs) scriptTabs.classList.add('hidden');
+      if (blocksContent) blocksContent.classList.add('hidden');
+      if (jsContent) jsContent.classList.add('hidden');
+      if (propsContent) propsContent.classList.add('hidden');
+      if (placeholder) placeholder.classList.remove('hidden');
+    }
+  }
+  
+  /** 更新子标签（积木/JS）的可见性 */
+  function _updateSubTabVisibility() {
+    const blocksEl = document.getElementById('script-blocks-content');
+    const jsEl = document.getElementById('script-js-content');
+    if (_currentSubTab === 'blocks') {
+      if (blocksEl) blocksEl.classList.remove('hidden');
+      if (jsEl) jsEl.classList.add('hidden');
+    } else {
+      if (blocksEl) blocksEl.classList.add('hidden');
+      if (jsEl) jsEl.classList.remove('hidden');
+    }
+  }
+  
+  /** 场景切换时清空标签页状态（旧场景的精灵索引不再有效）
+   * 注意: 不调用 _saveCurrentTabData()，因为此时精灵可能已是新场景的，
+   * 数据已由 saveCurrentSceneState() 在切换前保存。 */
+  function _clearTabsOnSceneSwitch() {
+    _spriteTabs = [];
+    _activeTabIdx = -1;
+    _showEditingUI(false);
+    _renderSpriteTabs();
+    setTimeout(() => {
+      if (typeof EditorCanvas !== 'undefined') {
+        EditorCanvas.resize();
+        EditorCanvas.render();
+      }
+    }, 50);
+  }
+
+  /** 渲染精灵标签栏 */
+  function _renderSpriteTabs() {
+    const container = document.getElementById('sprite-tabs');
+    if (!container) return;
+    container.innerHTML = '';
+    _spriteTabs.forEach((tab, idx) => {
+      const el = document.createElement('div');
+      el.className = 'sprite-tab' + (idx === _activeTabIdx ? ' active' : '');
+      const icon = tab.tabType === 'props' ? '⚙️ ' : '';
+      el.innerHTML = '<span class="sprite-tab-name"></span><span class="sprite-tab-close">&times;</span>';
+      el.querySelector('.sprite-tab-name').textContent = icon + (tab.tabType === 'props' ? tab.nodeName : tab.spriteName);
+      // 点击标签名切换
+      el.addEventListener('click', (e) => {
+        if (e.target.classList.contains('sprite-tab-close')) return;
+        _switchToTab(idx);
+      });
+      // 点击关闭按钮
+      el.querySelector('.sprite-tab-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        _closeTab(idx);
+      });
+      container.appendChild(el);
+    });
   }
 
   /** 当前代码语言 runner 名（python | javascript | alb）, 供项目保存时写入 config.codeLang */
@@ -2235,6 +2466,55 @@ window.EditorApp = (function () {
       StageManager.onActiveSpriteChange(_onCodeSpriteSelected);
     }
 
+    // 角色重命名时迁移代码存储（_codeScripts 键名 + 磁盘文件 + _codeEditorOwner）
+    if (typeof StageManager !== 'undefined' && StageManager.onSpriteRename) {
+      StageManager.onSpriteRename(async (idx, oldName, newName) => {
+        if (!_isCodeProjectMode() || !oldName || !newName || oldName === newName) return;
+        // 1) 先把编辑器当前内容写回旧名字的存储
+        _syncAllSpriteCode();
+        // 2) 迁移 _codeScripts 键: 旧名 → 新名
+        if (_codeScripts[oldName]) {
+          _codeScripts[newName] = _codeScripts[oldName];
+          delete _codeScripts[oldName];
+        }
+        // 3) 更新编辑器归属
+        if (_codeEditorOwner === oldName) _codeEditorOwner = newName;
+        // 4) 删除磁盘上旧名的代码文件（异步, 不阻塞）
+        if (EditorState.projectPath) {
+          const codeDir = EditorState.projectPath + '/code';
+          Object.keys(_RUNNER_EXT).forEach(runner => {
+            const ext = _RUNNER_EXT[runner];
+            if (window.api.deleteFile) window.api.deleteFile(codeDir + '/' + _safeCodeFileName(oldName) + '.' + ext);
+          });
+        }
+        // 5) 立即落盘（新名文件 + project.json）
+        _persistCodeScripts();
+        console.log('[代码编程模式] 角色重命名:', oldName, '→', newName, '代码已迁移');
+      });
+    }
+
+    // 角色删除时清理代码存储（_codeScripts 键名 + 磁盘文件）
+    if (typeof StageManager !== 'undefined' && StageManager.onSpriteDelete) {
+      StageManager.onSpriteDelete(async (idx, name) => {
+        if (!_isCodeProjectMode() || !name) return;
+        // 1) 删除 _codeScripts 键
+        delete _codeScripts[name];
+        // 2) 清理编辑器归属
+        if (_codeEditorOwner === name) _codeEditorOwner = '';
+        // 3) 删除磁盘上的代码文件（异步, 不阻塞）
+        if (EditorState.projectPath) {
+          const codeDir = EditorState.projectPath + '/code';
+          Object.keys(_RUNNER_EXT).forEach(runner => {
+            const ext = _RUNNER_EXT[runner];
+            if (window.api.deleteFile) window.api.deleteFile(codeDir + '/' + _safeCodeFileName(name) + '.' + ext);
+          });
+        }
+        // 4) 立即落盘（project.json）
+        _persistCodeScripts();
+        console.log('[代码编程模式] 角色删除:', name, '代码已清理');
+      });
+    }
+
     // 初始化 CodeMirror
     const editorWrap = document.getElementById('code-editor-wrap');
     if (editorWrap && typeof CodeMirror !== 'undefined' && !_codeEditor) {
@@ -2289,6 +2569,24 @@ window.EditorApp = (function () {
       if (!_codeEditor) return;
       if (confirm('确定清空所有代码吗？')) {
         _codeEditor.setValue('');
+      }
+    });
+
+    // 搜索按钮：触发 CodeMirror 的查找功能
+    document.getElementById('code-search-btn')?.addEventListener('click', () => {
+      if (_codeEditor) _codeEditor.execCommand('find');
+    });
+
+    // 上传造型按钮
+    document.getElementById('code-upload-costume-btn')?.addEventListener('click', () => {
+      if (typeof uploadCostumeDialog === 'function') uploadCostumeDialog();
+    });
+
+    // 舞台按钮：切换舞台面板可见性
+    document.getElementById('code-stage-btn')?.addEventListener('click', () => {
+      const stagePanel = document.getElementById('stage-panel');
+      if (stagePanel) {
+        stagePanel.classList.toggle('hidden');
       }
     });
 
@@ -2380,20 +2678,20 @@ window.EditorApp = (function () {
 
   /** 获取当前精灵的 JS 脚本 */
   function getSpriteScript(index) {
-    return _spriteScripts[index] || '';
+    return _getSceneScripts()[index] || '';
   }
 
   /** 设置当前精灵的 JS 脚本 */
   function setSpriteScript(index, code) {
-    _spriteScripts[index] = code;
+    _getSceneScripts()[index] = code;
   }
 
-  /** 获取所有精灵脚本（用于保存） */
+  /** 获取所有精灵脚本（用于保存，按场景） */
   function getAllSpriteScripts() {
     return { ..._spriteScripts };
   }
 
-  /** 批量设置精灵脚本（用于加载） */
+  /** 批量设置精灵脚本（用于加载，按场景） */
   function setAllSpriteScripts(scripts) {
     _spriteScripts = scripts || {};
   }
@@ -2405,12 +2703,12 @@ window.EditorApp = (function () {
 
   /** 获取节点的 JS 脚本（非 Sprite2D 节点） */
   function getNodeScript(nodeId) {
-    return _nodeScripts[nodeId] || '';
+    return _getSceneNodeScripts()[nodeId] || '';
   }
 
   /** 设置节点的 JS 脚本（非 Sprite2D 节点） */
   function setNodeScript(nodeId, code) {
-    _nodeScripts[nodeId] = code;
+    _getSceneNodeScripts()[nodeId] = code;
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
@@ -2628,6 +2926,10 @@ window.EditorApp = (function () {
       // 清空面板输出
       if (_panelsOpened && window.api && window.api.sendPanelUpdate) {
         window.api.sendPanelUpdate({ type: 'output', action: 'set', text: '' });
+      }
+      // 高级模式：将标签页中的积木同步到精灵对象（executor 运行时从精灵读取）
+      if (typeof _flushBlocksToSprites === 'function') {
+        _flushBlocksToSprites();
       }
       // 锁定编辑区，禁止运行时编辑
       _lockEditorForRuntime();
@@ -3915,13 +4217,11 @@ window.EditorApp = (function () {
 
     document.getElementById('status-text').textContent = i18n.t('status.loaded', null).replace('{name}', EditorState.projectName);
 
-    // 扩展模式：显示文件面板（新建/保存/加载测试 + 代码编辑区, 支持 .json / .js / .py）
+    // 扩展模式：显示文件编辑器按钮
     if (EditorState.projectMode === 'extension') {
-      document.getElementById('stage-panel').classList.add('extension-mode');
-      const filesEl = document.getElementById('files-content');
-      if (filesEl) {
-        filesEl.classList.remove('hidden');
-        filesEl.style.display = 'flex';   // 同时清掉行内 display:none, 否则面板仍不可见
+      const fileEditorBtn = document.getElementById('btn-ext-file-editor');
+      if (fileEditorBtn) {
+        fileEditorBtn.classList.remove('hidden');
       }
       if (typeof FileEditor !== 'undefined') FileEditor.refreshFileList();
     }
@@ -3948,6 +4248,8 @@ window.EditorApp = (function () {
           if (sceneData.rootId || sceneData.nodes) {
             SceneGraph.fromJSON(sceneData);
             if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+            // 从场景文件加载积木到 _spriteBlocks（独立于 sprite 对象）
+            _loadBlocksFromSceneData(sceneData);
             // 3D 场景：同步 Mesh3D 节点到 Three.js 渲染
             if (typeof Stage3D !== 'undefined' && Stage3D.isInitialized && Stage3D.isInitialized()) {
               Stage3D.syncMeshesFromSceneGraph();
@@ -3991,13 +4293,23 @@ window.EditorApp = (function () {
         }
       }
 
-      // 恢复 JS 脚本
-      if (config.jsScripts && typeof EditorApp !== 'undefined' && EditorApp.setAllSpriteScripts) {
-        const scripts = {};
-        Object.keys(config.jsScripts).forEach(k => {
-          scripts[parseInt(k)] = config.jsScripts[k];
-        });
-        EditorApp.setAllSpriteScripts(scripts);
+      // 恢复 JS 脚本 - 优先从场景文件夹 scripts/<sceneName>/ 加载
+      const currentScene = EditorState._currentSceneName || 'main';
+      await loadSceneScripts(currentScene);
+      // 回退：如果场景文件夹为空，尝试从旧的 config.jsScripts 恢复
+      if (!_spriteScripts[currentScene] || Object.keys(_spriteScripts[currentScene]).length === 0) {
+        if (config.jsScripts) {
+          // config.jsScripts 格式: { sceneName: { spriteIdx: code } }
+          // 直接作为整个 _spriteScripts 对象导入
+          if (typeof config.jsScripts === 'object') {
+            const keys = Object.keys(config.jsScripts);
+            // 检查是否是按场景存储的格式（key 是场景名）
+            if (keys.length > 0 && typeof config.jsScripts[keys[0]] === 'object') {
+              _spriteScripts = { ...config.jsScripts };
+              console.log('[高级模式] 已从 project.json 回退加载 JS 脚本:', keys);
+            }
+          }
+        }
       }
 
       // 自动选中第一个 Sprite2D 节点（确保编辑器与精灵关联、代码可保存/运行）
@@ -4335,10 +4647,10 @@ window.EditorApp = (function () {
       // 只有编辑器当前关联的精灵才从编辑器读取代码
       if (editor && _editorSpriteIdx === index) {
         code = editor.getValue();
-        _spriteScripts[index] = code;
+        _getSceneScripts()[index] = code;
       } else {
         // 使用该精灵自己的脚本
-        code = _spriteScripts[index] || '';
+        code = _getSceneScripts()[index] || '';
       }
       if (!code || !code.trim() || /^\s*(\/\/[^\n]*\n?|\/\*[\s\S]*?\*\/\s*)+$/.test(code)) return;
       if (_jsScriptFrameCount <= 3) console.log('[JS脚本] 执行精灵', index, '代码长度:', code.length);
@@ -4399,5 +4711,14 @@ window.EditorApp = (function () {
     getEditorSpriteIdx,
     initAdvancedMode,
     runAdvancedScripts,
+    saveCurrentSceneState,
+    loadSceneScripts,
+    openSpriteScriptEditor,
+    openNodeProperties,
+    _clearTabsOnSceneSwitch,
+    _hasActiveTabs,
+    _loadBlocksFromSceneData,
+    _syncBlocksToSceneGraph,
+    _flushBlocksToSprites,
   };
 })();

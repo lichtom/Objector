@@ -1366,6 +1366,469 @@ function stopRun() {
     document.getElementById('status-text').textContent = (i18n.isEnglish() ? 'Exported: ' : '\u5df2\u5bfc\u51fa: ') + projectName + '.html';
   }
   
+  /** 检测当前是否为代码编程模式 */
+  function _isCodeMode() {
+    if (typeof EditorApp === 'undefined' || !EditorApp.getCodeLangRunner) return false;
+    var mode = (typeof EditorState !== 'undefined' && EditorState.projectMode) ? String(EditorState.projectMode) : '';
+    return mode === 'code' || mode.indexOf('code-') === 0;
+  }
+
+  /** 收集代码模式导出数据（async: ALB 模式下需读取解释器源码） */
+  async function _collectCodeModeData() {
+    var spritesData = [];
+    try {
+      var sprites = StageManager.getSprites();
+      for (var si = 0; si < sprites.length; si++) {
+        var s = sprites[si];
+        var spriteData = {
+          name: s.name, x: s.x, y: s.y, direction: s.direction,
+          size: s.size, visible: s.visible, color: s.color || '#4C97FF',
+          rotationStyle: s.rotationStyle || 'allAround', isStage: s.isStage || false,
+        };
+        if (s.costumeImage) {
+          try {
+            var tmpCanvas = document.createElement('canvas');
+            tmpCanvas.width = s.costumeImage.width; tmpCanvas.height = s.costumeImage.height;
+            tmpCanvas.getContext('2d').drawImage(s.costumeImage, 0, 0);
+            spriteData.costumePath = tmpCanvas.toDataURL('image/png');
+          } catch (e) {}
+        }
+        spritesData.push(spriteData);
+      }
+    } catch(e) {}
+    var runner = (typeof EditorApp !== 'undefined' && EditorApp.getCodeLangRunner) ? EditorApp.getCodeLangRunner() : 'javascript';
+    var codeMap = {};
+    if (typeof EditorApp !== 'undefined' && EditorApp.getAllCodeScripts) {
+      var all = EditorApp.getAllCodeScripts();
+      Object.keys(all).forEach(function(name) {
+        if (all[name] && all[name][runner]) codeMap[name] = String(all[name][runner]);
+      });
+    }
+    // ALB 模式: 从磁盘读取解释器源码, 内联到导出 HTML
+    var albSource = '';
+    if (runner === 'alb' && window.api && window.api.readFile && EditorState.projectPath) {
+      try {
+        // projectPath 是目录路径, 如 e:\My App\ObjectScratch\proj\ALB
+        // 需往上 2 级到 ObjectScratch 根目录, 再进入 interpreter/alb.js
+        var albPath;
+        if (window.api.pathJoin) {
+          albPath = await window.api.pathJoin(EditorState.projectPath, '..', '..', 'interpreter', 'alb.js');
+        } else {
+          // pathJoin 不可用时, 用字符串拼接手动解析路径
+          var _parts = EditorState.projectPath.replace(/\\/g, '/').split('/');
+          _parts.pop(); _parts.pop(); // 去掉 ProjectName, proj
+          albPath = _parts.join('/') + '/interpreter/alb.js';
+        }
+        console.log('[ALB导出] 尝试读取 alb.js, 路径:', albPath);
+        albSource = await window.api.readFile(albPath);
+        if (!albSource) console.warn('[ALB导出] 读取 alb.js 失败 (返回空), 路径:', albPath);
+        else console.log('[ALB导出] 读取 alb.js 成功, 长度:', albSource.length);
+      } catch (e) { console.warn('[ALB导出] 读取 alb.js 异常:', e); }
+    }
+    return { spritesData: spritesData, runner: runner, codeMap: codeMap, albSource: albSource };
+  }
+
+  /** 生成代码模式可运行的 HTML（内置解释器和代码） */
+  function generateCodeModeHTML(projectName, spritesData, runner, codeMap, exportSettings, albSource) {
+    var sprites = JSON.stringify(spritesData || []);
+    var codeMapJSON = JSON.stringify(codeMap || {});
+    var S = exportSettings || {};
+    var gameTitle = S.title || projectName;
+    var showConsole = S.showConsole !== false;
+    var autoRun = !!S.autoRun;
+    var interval = runner === 'python' ? 100 : 33;
+
+    // ★ ALB 分支代码用字符串拼接 + base64 编码嵌入源码
+    // 用 base64 编码 alb.js 源码, 彻底避免模板字面量 / 字符串字面量的转义问题:
+    //   base64 字符串只含 A-Z a-z 0-9 + / =, 不会破坏任何语法结构
+    var albBranchCode = '';
+    if (runner === 'alb') {
+      albBranchCode += '// ALB 代码模式运行时\n';
+      albBranchCode += 'window.addEventListener("error", function(ev) {\n';
+      albBranchCode += '  var msg = "[页面错误] " + (ev.message || ev.error) + " @ line " + ev.lineno + ":" + ev.colno;\n';
+      albBranchCode += '  console.error(msg); if (typeof log === "function") log(msg);\n';
+      albBranchCode += '});\n';
+      albBranchCode += 'window.addEventListener("unhandledrejection", function(ev) {\n';
+      albBranchCode += '  var msg = "[Promise错误] " + (ev.reason && ev.reason.message || ev.reason);\n';
+      albBranchCode += '  console.error(msg); if (typeof log === "function") log(msg);\n';
+      albBranchCode += '});\n';
+      if (albSource) {
+        // 用 base64 编码, 在浏览器端解码后用 new Function 执行
+        var albB64 = btoa(unescape(encodeURIComponent(albSource)));
+        albBranchCode += '// === 加载 ALB 解释器 (base64 编码嵌入, 用 new Function 执行) ===\n';
+        albBranchCode += 'try {\n';
+        albBranchCode += '  var _albB64 = "' + albB64 + '";\n';
+        albBranchCode += '  var _albRaw = new TextDecoder("utf-8").decode(Uint8Array.from(atob(_albB64), function(c){return c.charCodeAt(0);}));\n';
+        albBranchCode += '  console.log("[ALB导出] ALB 源码 base64 长度:", _albB64.length, "解码后长度:", _albRaw.length);\n';
+        albBranchCode += '  (new Function(_albRaw))();\n';
+        albBranchCode += '  console.log("[ALB导出] ALB 源码执行完毕, 无异常");\n';
+        albBranchCode += '} catch(_albLoadErr) {\n';
+        albBranchCode += '  console.error("[ALB导出] ALB 源码加载失败:", _albLoadErr);\n';
+        albBranchCode += '  if (typeof log === "function") log("ALB 解释器加载失败: " + (_albLoadErr && _albLoadErr.message || _albLoadErr));\n';
+        albBranchCode += '}\n';
+      } else {
+        albBranchCode += '(function() { if (typeof log === "function") log("ALB 解释器未内联, 无法运行"); })();\n';
+      }
+      albBranchCode += 'var _albInst = null;\n';
+      albBranchCode += 'var _apiNames = ["set_sprite","sprite_name","sprite_count","get_x","get_y","get_direction","get_size",\n';
+      albBranchCode += '  "set_x","set_y","change_x","change_y","goto_xy","move","turn_right","turn_left","point_in_direction",\n';
+      albBranchCode += '  "bounce_edge","point_towards_xy","show","hide","set_size","change_size","say","clear_say","say_for",\n';
+      albBranchCode += '  "think","stage_width","stage_height","mouse_x","mouse_y","mouse_down","key_pressed","touching_edge",\n';
+      albBranchCode += '  "touching_sprite","distance_to","sprite_x","sprite_y","timer_now","random_int","get_var","set_var",\n';
+      albBranchCode += '  "change_var","has_var","sleep","stop_all","math_abs","math_floor","math_ceil","math_round","math_sqrt",\n';
+      albBranchCode += '  "math_min","math_max","math_pi","math_sin","math_cos","math_tan","str_len","str_upper","str_lower","str_trim"];\n';
+      albBranchCode += 'console.log("[ALB导出] === 加载诊断 ===");\n';
+      albBranchCode += 'console.log("[ALB导出] typeof createALB:", typeof createALB);\n';
+      albBranchCode += 'console.log("[ALB导出] typeof ALB:", typeof ALB);\n';
+      albBranchCode += 'console.log("[ALB导出] typeof ALBInterpreter:", typeof ALBInterpreter);\n';
+      albBranchCode += 'console.log("[ALB导出] typeof window.createALB:", typeof window.createALB);\n';
+      albBranchCode += 'console.log("[ALB导出] _codeMap 角色:", Object.keys(_codeMap));\n';
+      albBranchCode += 'console.log("[ALB导出] sprites:", sprites.map(function(s){return s.name;}));\n';
+      albBranchCode += 'Object.keys(_codeMap).forEach(function(name) {\n';
+      albBranchCode += '  console.log("[ALB导出] --- 角色 [" + name + "] 代码长度:", _codeMap[name].length);\n';
+      albBranchCode += '  console.log("[ALB导出] --- 角色 [" + name + "] 代码前100字符:", _codeMap[name].substring(0, 100));\n';
+      albBranchCode += '});\n';
+      albBranchCode += 'console.log("[ALB导出] === 诊断结束 ===");\n';
+      albBranchCode += 'function _initALB() {\n';
+      albBranchCode += '  console.log("[ALB导出] _initALB 开始");\n';
+      albBranchCode += '  if (typeof createALB !== "function") {\n';
+      albBranchCode += '    console.error("[ALB导出] createALB 不是函数, typeof:", typeof createALB);\n';
+      albBranchCode += '    log("ALB 解释器未加载 (createALB 不存在)");\n';
+      albBranchCode += '    return false;\n';
+      albBranchCode += '  }\n';
+      albBranchCode += '  try {\n';
+      albBranchCode += '    _albInst = createALB();\n';
+      albBranchCode += '    console.log("[ALB导出] createALB() 成功");\n';
+      albBranchCode += '  } catch(e) {\n';
+      albBranchCode += '    console.error("[ALB导出] createALB() 异常:", e);\n';
+      albBranchCode += '    log("ALB 解释器创建失败: " + e.message);\n';
+      albBranchCode += '    return false;\n';
+      albBranchCode += '  }\n';
+      albBranchCode += '  var injected = 0;\n';
+      albBranchCode += '  _apiNames.forEach(function(n) {\n';
+      albBranchCode += '    try { _albInst.setFunc(n, window[n]); injected++; } catch(e) { console.warn("[ALB导出] setFunc " + n + " 失败:", e.message); }\n';
+      albBranchCode += '  });\n';
+      albBranchCode += '  console.log("[ALB导出] 注入 API 函数:", injected, "/", _apiNames.length);\n';
+      albBranchCode += '  try { _albInst.setConst("STAGE_W", STAGE_W); _albInst.setConst("STAGE_H", STAGE_H); } catch(e) { console.warn("[ALB导出] setConst 失败:", e.message); }\n';
+      albBranchCode += '  log("ALB 解释器初始化成功, " + Object.keys(_codeMap).length + " 个角色");\n';
+      albBranchCode += '  return true;\n';
+      albBranchCode += '}\n';
+      albBranchCode += 'function _execAlbFrame() {\n';
+      albBranchCode += '  if (!running || !_albInst) return;\n';
+      albBranchCode += '  Object.keys(_codeMap).forEach(function(name) {\n';
+      albBranchCode += '    var idx = sprites.findIndex(function(s){return s.name===name;});\n';
+      albBranchCode += '    if (idx < 0) { console.warn("[ALB导出] 角色 [" + name + "] 在 sprites 中找不到"); return; }\n';
+      albBranchCode += '    _activeSpriteIdx = idx;\n';
+      albBranchCode += '    try {\n';
+      albBranchCode += '      var r = _albInst.run(_codeMap[name]);\n';
+      albBranchCode += '      (r.output || []).forEach(function(line) { log(line); });\n';
+      albBranchCode += '      if (r.error) { log("[ALB错误] " + name + ": " + r.error); console.error("[ALB导出] 运行错误:", r.error); }\n';
+      albBranchCode += '    } catch(e) { log("[ALB异常] " + name + ": " + e.message); console.error("[ALB导出] 异常:", e); }\n';
+      albBranchCode += '  });\n';
+      albBranchCode += '}\n';
+      albBranchCode += 'function startRun() {\n';
+      albBranchCode += '  console.log("[ALB导出] startRun 被调用");\n';
+      albBranchCode += '  if (running) { console.log("[ALB导出] 已在运行中"); return; }\n';
+      albBranchCode += '  running = true; globalVars = {}; output = []; outputEl.textContent = ""; _startTime = Date.now();\n';
+      albBranchCode += '  if (!_albInst) { if (!_initALB()) { running = false; return; } }\n';
+      albBranchCode += '  console.log("[ALB导出] 启动帧循环, 间隔 ' + interval + 'ms");\n';
+      albBranchCode += '  _frameTimer = setInterval(_execAlbFrame, ' + interval + ');\n';
+      albBranchCode += '}\n';
+      albBranchCode += 'function stopRun() { running = false; if (_frameTimer) { clearInterval(_frameTimer); _frameTimer = null; } }\n';
+    }
+
+    var pyCDN = '<script src="https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt.min.js"><\/script>\n<script src="https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt-stdlib.js"><\/script>';
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>${gameTitle}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { width:100%; height:100%; overflow:hidden; background:#0a0a0f; font-family:'Segoe UI','Microsoft YaHei',sans-serif; user-select:none; -webkit-user-select:none; }
+    #game-container { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#0a0a0f; }
+    #stage { background:#fff; border-radius:4px; display:block; }
+    #top-bar { position:absolute; top:0; left:0; right:0; height:40px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; z-index:100; background:linear-gradient(to bottom, rgba(0,0,0,.6), transparent); pointer-events:none; }
+    #top-bar > * { pointer-events:auto; }
+    #game-title { color:#fff; font-size:14px; font-weight:600; text-shadow:0 1px 4px rgba(0,0,0,.8); opacity:.8; }
+    #game-controls { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:100; }
+    .game-btn { background:rgba(255,255,255,.1); color:#cdd6f4; border:1px solid rgba(255,255,255,.15); border-radius:20px; padding:8px 20px; cursor:pointer; font-size:13px; backdrop-filter:blur(4px); }
+    .game-btn:hover { background:rgba(255,255,255,.2); }
+    .game-btn.run { background:rgba(76,175,80,.2); color:#a5d6a7; border-color:rgba(76,175,80,.3); }
+    .game-btn.stop { background:rgba(244,67,54,.15); color:#ef9a9a; border-color:rgba(244,67,54,.25); }
+    #output-wrap { position:absolute; bottom:0; left:0; right:0; z-index:80; transition:transform .25s; }
+    #output-wrap.collapsed { transform:translateY(calc(100% - 28px)); }
+    #output-toggle { height:28px; background:rgba(24,24,37,.9); border-top:1px solid rgba(255,255,255,.1); display:flex; align-items:center; padding:0 10px; cursor:pointer; color:#a6adc8; font-size:11px; gap:4px; }
+    #output-toggle .arrow { transition:transform .2s; }
+    #output-wrap.collapsed #output-toggle .arrow { transform:rotate(180deg); }
+    #output { color:#a6adc8; font-family:'Cascadia Code','Consolas',monospace; font-size:11px; height:100px; overflow-y:auto; background:rgba(24,24,37,.95); padding:6px 10px; white-space:pre-wrap; backdrop-filter:blur(8px); }
+  </style>
+${runner === 'python' ? '  ' + pyCDN + '\n' : ''}</head>
+<body>
+<div id="game-container">
+  <canvas id="stage" width="480" height="360"></canvas>
+  <div id="top-bar"><span id="game-title">${gameTitle}</span></div>
+  <div id="game-controls">
+    <button class="game-btn run" onclick="startRun()">\u25B6 \u8fd0\u884c</button>
+    <button class="game-btn stop" onclick="stopRun()">\u23F9 \u505c\u6b62</button>
+  </div>
+${showConsole ? '  <div id="output-wrap">\n    <div id="output-toggle" onclick="document.getElementById(\'output-wrap\').classList.toggle(\'collapsed\')">\n      <span class="arrow">\u25BC</span> \u8F93\u51FA\n    </div>\n    <div id="output"></div>\n  </div>' : '<div id="output" style="display:none;"></div>'}
+</div>
+<script>
+const STAGE_W = 480, STAGE_H = 360;
+const canvas = document.getElementById('stage');
+const outputEl = document.getElementById('output');
+let running = false, globalVars = {}, _startTime = Date.now();
+let sprites = ${sprites};
+let _codeMap = ${codeMapJSON};
+let _lang = '${runner}';
+let _frameTimer = null;
+let mouseX = 0, mouseY = 0, mouseDown = false, pressedKeys = {};
+let output = [];
+function log(msg) { output.push(String(msg)); if (outputEl) { outputEl.textContent = output.join('\\n'); outputEl.scrollTop = outputEl.scrollHeight; } }
+
+// 分离舞台背景
+var _stageBgImg = null;
+var _stageBgData = sprites.find(function(s) { return s.isStage; });
+sprites = sprites.filter(function(s) { return !s.isStage; });
+if (_stageBgData && _stageBgData.costumePath) { _stageBgImg = new Image(); _stageBgImg.src = _stageBgData.costumePath; }
+
+// 预加载造型
+sprites.forEach(function(s) {
+  s.x = s.x || 0; s.y = s.y || 0; s.direction = s.direction != null ? s.direction : 90;
+  s.size = s.size || 100; s.visible = s.visible !== false; s.sayText = '';
+  s.rotationStyle = s.rotationStyle || 'allAround'; s.image = null;
+  if (s.costumePath) { var img = new Image(); img.onload = function() { s.image = img; }; img.src = s.costumePath; }
+});
+
+// 自适应窗口
+var ctx = canvas.getContext('2d');
+function _resize() {
+  var c = document.getElementById('game-container');
+  var mw = c ? c.clientWidth - 16 : window.innerWidth - 16;
+  var mh = c ? c.clientHeight - 60 : window.innerHeight - 60;
+  var a = STAGE_W / STAGE_H, cw, ch;
+  if (mw / mh > a) { ch = mh; cw = Math.floor(ch * a); } else { cw = mw; ch = Math.floor(cw / a); }
+  canvas.width = STAGE_W; canvas.height = STAGE_H;
+  canvas.style.width = Math.max(240, cw) + 'px'; canvas.style.height = Math.max(180, ch) + 'px';
+}
+_resize(); window.addEventListener('resize', _resize);
+
+// 鼠标/键盘追踪
+canvas.addEventListener('mousemove', function(e) {
+  var r = canvas.getBoundingClientRect();
+  mouseX = Math.round((e.clientX - r.left) / r.width * STAGE_W - STAGE_W / 2);
+  mouseY = Math.round((e.clientY - r.top) / r.height * STAGE_H - STAGE_H / 2);
+});
+canvas.addEventListener('mousedown', function() { mouseDown = true; });
+canvas.addEventListener('mouseup', function() { mouseDown = false; });
+var _keyMap = {' ':'space','ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right','Enter':'enter','Shift':'shift','Control':'control','Alt':'alt','Escape':'escape','Tab':'tab','Backspace':'backspace'};
+function mapKey(k) { return _keyMap[k] || k.toLowerCase(); }
+document.addEventListener('keydown', function(e) { if (!e.repeat) pressedKeys[mapKey(e.key)] = true; });
+document.addEventListener('keyup', function(e) { delete pressedKeys[mapKey(e.key)]; });
+
+// 渲染
+function render() {
+  ctx.clearRect(0, 0, STAGE_W, STAGE_H);
+  if (_stageBgImg && _stageBgImg.complete) {
+    var bw = _stageBgImg.width, bh = _stageBgImg.height, sc = Math.min(STAGE_W/bw, STAGE_H/bh);
+    var dw = bw*sc, dh = bh*sc;
+    ctx.drawImage(_stageBgImg, (STAGE_W-dw)/2, (STAGE_H-dh)/2, dw, dh);
+  } else { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, STAGE_W, STAGE_H); }
+  sprites.forEach(function(s) {
+    if (!s.visible) return;
+    ctx.save(); ctx.translate(STAGE_W/2 + s.x, STAGE_H/2 - s.y);
+    if (s.rotationStyle === 'allAround') ctx.rotate((s.direction - 90) * Math.PI / 180);
+    else if (s.rotationStyle === 'leftRight' && s.direction > 180) ctx.scale(-1, 1);
+    var sc = s.size / 100; ctx.scale(sc, sc);
+    if (s.image) { ctx.drawImage(s.image, -s.image.width/2, -s.image.height/2); }
+    else {
+      ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(14,14); ctx.lineTo(-14,14); ctx.closePath();
+      ctx.fillStyle = s.color || '#4C97FF'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-4,-4,3,0,Math.PI*2); ctx.arc(4,-4,3,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(-3,-4,1.5,0,Math.PI*2); ctx.arc(5,-4,1.5,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+    if (s.sayText) {
+      var bx = STAGE_W/2+s.x+25, by = STAGE_H/2-s.y-30;
+      ctx.fillStyle='#fff'; ctx.strokeStyle='#333'; ctx.lineWidth=1;
+      ctx.font='12px sans-serif'; var tw=ctx.measureText(s.sayText).width;
+      ctx.beginPath(); ctx.roundRect(bx,by,tw+12,22,6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#333'; ctx.fillText(s.sayText, bx+6, by+15);
+    }
+  });
+}
+function _renderLoop() { render(); requestAnimationFrame(_renderLoop); }
+_renderLoop();
+
+// === 游戏 API（snake_case, 供用户代码调用） ===
+var _activeSpriteIdx = 0;
+function _getSprite(i) { return sprites[i >= 0 ? i : _activeSpriteIdx] || sprites[0]; }
+function _num(v, d) { var n = Number(v); return Number.isFinite(n) ? n : (d || 0); }
+function set_sprite(name_or_idx) {
+  if (typeof name_or_idx === 'number' || /^\\d+$/.test(String(name_or_idx))) { _activeSpriteIdx = _num(name_or_idx, 0); }
+  else { var i = sprites.findIndex(function(s){return s.name===String(name_or_idx);}); if (i>=0) _activeSpriteIdx = i; }
+  return _activeSpriteIdx;
+}
+function sprite_name() { var s = _getSprite(_activeSpriteIdx); return s ? s.name : ''; }
+function sprite_count() { return sprites.length; }
+function get_x() { var s = _getSprite(_activeSpriteIdx); return s ? s.x : 0; }
+function get_y() { var s = _getSprite(_activeSpriteIdx); return s ? s.y : 0; }
+function get_direction() { var s = _getSprite(_activeSpriteIdx); return s ? s.direction : 90; }
+function get_size() { var s = _getSprite(_activeSpriteIdx); return s ? s.size : 100; }
+function set_x(v) { var s = _getSprite(_activeSpriteIdx); if (s) s.x = _num(v); }
+function set_y(v) { var s = _getSprite(_activeSpriteIdx); if (s) s.y = _num(v); }
+function change_x(v) { var s = _getSprite(_activeSpriteIdx); if (s) s.x += _num(v); }
+function change_y(v) { var s = _getSprite(_activeSpriteIdx); if (s) s.y += _num(v); }
+function goto_xy(x, y) { var s = _getSprite(_activeSpriteIdx); if (s) { s.x = _num(x); s.y = _num(y); } }
+function move(steps) {
+  var s = _getSprite(_activeSpriteIdx); if (!s) return;
+  var rad = (s.direction - 90) * Math.PI / 180;
+  s.x += Math.cos(rad) * _num(steps); s.y += Math.sin(rad) * _num(steps);
+}
+function turn_right(deg) { var s = _getSprite(_activeSpriteIdx); if (s) s.direction = ((s.direction + _num(deg)) % 360 + 360) % 360; }
+function turn_left(deg) { var s = _getSprite(_activeSpriteIdx); if (s) s.direction = ((s.direction - _num(deg)) % 360 + 360) % 360; }
+function point_in_direction(deg) { var s = _getSprite(_activeSpriteIdx); if (s) s.direction = _num(deg); }
+function bounce_edge() {
+  var s = _getSprite(_activeSpriteIdx); if (!s) return;
+  var hw = STAGE_W/2, hh = STAGE_H/2;
+  if (s.x < -hw || s.x > hw) s.direction = 180 - s.direction;
+  if (s.y < -hh || s.y > hh) s.direction = -s.direction;
+}
+function point_towards_xy(x, y) {
+  var s = _getSprite(_activeSpriteIdx); if (!s) return;
+  s.direction = Math.atan2(_num(y) - s.y, _num(x) - s.x) * 180 / Math.PI + 90;
+}
+function show() { var s = _getSprite(_activeSpriteIdx); if (s) s.visible = true; }
+function hide() { var s = _getSprite(_activeSpriteIdx); if (s) s.visible = false; }
+function set_size(v) { var s = _getSprite(_activeSpriteIdx); if (s) s.size = _num(v, 100); }
+function change_size(d) { var s = _getSprite(_activeSpriteIdx); if (s) s.size += _num(d); }
+function say(text) { var s = _getSprite(_activeSpriteIdx); if (s) s.sayText = String(text); }
+function clear_say() { var s = _getSprite(_activeSpriteIdx); if (s) s.sayText = ''; }
+function say_for(text, sec) { say(text); var idx = _activeSpriteIdx; setTimeout(function(){ var s = sprites[idx]; if(s && s.sayText) s.sayText = ''; }, _num(sec,1)*1000); }
+function think(text) { say('\\u{1F4AD} ' + String(text)); }
+function stage_width() { return STAGE_W; }
+function stage_height() { return STAGE_H; }
+function mouse_x() { return mouseX; }
+function mouse_y() { return mouseY; }
+function mouse_down() { return mouseDown; }
+function key_pressed(key) { return !!pressedKeys[String(key)]; }
+function touching_edge() { var s = _getSprite(_activeSpriteIdx); if(!s) return false; var hw=STAGE_W/2,hh=STAGE_H/2; return s.x<=-hw||s.x>=hw||s.y<=-hh||s.y>=hh; }
+function touching_sprite(name) {
+  var s = _getSprite(_activeSpriteIdx), t = sprites.find(function(sp){return sp.name===String(name);});
+  if (!s || !t) return false;
+  var dx = s.x-t.x, dy = s.y-t.y; return Math.sqrt(dx*dx+dy*dy) < 40;
+}
+function distance_to(name) {
+  var s = _getSprite(_activeSpriteIdx), t = sprites.find(function(sp){return sp.name===String(name);});
+  if (!s || !t) return 0; return Math.sqrt((s.x-t.x)**2+(s.y-t.y)**2);
+}
+function sprite_x(name) { var t = sprites.find(function(sp){return sp.name===String(name);}); return t ? t.x : 0; }
+function sprite_y(name) { var t = sprites.find(function(sp){return sp.name===String(name);}); return t ? t.y : 0; }
+function timer_now() { return (Date.now() - _startTime) / 1000; }
+function random_int(a, b) { var lo=Math.min(_num(a),_num(b)), hi=Math.max(_num(a),_num(b)); return Math.floor(Math.random()*(hi-lo+1))+lo; }
+function get_var(name, def) { var k=String(name); return k in globalVars ? globalVars[k] : _num(def, 0); }
+function set_var(name, v) { globalVars[String(name)] = v; }
+function change_var(name, d) { var k=String(name); globalVars[k] = _num(globalVars[k],0)+_num(d); return globalVars[k]; }
+function has_var(name) { return String(name) in globalVars; }
+function sleep(sec) { var end = Date.now() + Math.max(0, _num(sec)*1000); while (Date.now() < end) {} }
+function stop_all() { stopRun(); }
+// 数学辅助
+function math_abs(v){return Math.abs(_num(v));} function math_floor(v){return Math.floor(_num(v));}
+function math_ceil(v){return Math.ceil(_num(v));} function math_round(v){return Math.round(_num(v));}
+function math_sqrt(v){return Math.sqrt(_num(v));} function math_min(a,b){return Math.min(_num(a),_num(b));}
+function math_max(a,b){return Math.max(_num(a),_num(b));} function math_pi(){return Math.PI;}
+function math_sin(v){return Math.sin(_num(v));} function math_cos(v){return Math.cos(_num(v));}
+function math_tan(v){return Math.tan(_num(v));}
+// 文本辅助
+function str_len(s){return String(s==null?'':s).length;} function str_upper(s){return String(s==null?'':s).toUpperCase();}
+function str_lower(s){return String(s==null?'':s).toLowerCase();} function str_trim(s){return String(s==null?'':s).trim();}
+
+${runner === 'javascript' ? `
+// JavaScript 代码模式运行时
+var _apiFuncs = ['set_sprite','sprite_name','sprite_count','get_x','get_y','get_direction','get_size',
+  'set_x','set_y','change_x','change_y','goto_xy','move','turn_right','turn_left','point_in_direction',
+  'bounce_edge','point_towards_xy','show','hide','set_size','change_size','say','clear_say','say_for',
+  'think','stage_width','stage_height','mouse_x','mouse_y','mouse_down','key_pressed','touching_edge',
+  'touching_sprite','distance_to','sprite_x','sprite_y','timer_now','random_int','get_var','set_var',
+  'change_var','has_var','sleep','stop_all','math_abs','math_floor','math_ceil','math_round','math_sqrt',
+  'math_min','math_max','math_pi','math_sin','math_cos','math_tan','str_len','str_upper','str_lower','str_trim'];
+function _execFrame() {
+  if (!running) return;
+  Object.keys(_codeMap).forEach(function(name) {
+    var idx = sprites.findIndex(function(s){return s.name===name;});
+    if (idx < 0) return;
+    _activeSpriteIdx = idx;
+    try {
+      // 把 API 函数注入到执行上下文
+      var args = _apiFuncs.map(function(n){ return 'var ' + n + ' = window.' + n + ';'; }).join('');
+      var fn = new Function(args + _codeMap[name]);
+      fn.call(sprites[idx]);
+    } catch(e) { log('[JS] ' + name + ': ' + e.message); }
+  });
+}
+function startRun() {
+  if (running) return;
+  running = true; globalVars = {}; output = []; outputEl.textContent = ''; _startTime = Date.now();
+  _frameTimer = setInterval(_execFrame, ${interval});
+}
+function stopRun() { running = false; if (_frameTimer) { clearInterval(_frameTimer); _frameTimer = null; } }
+` : ''}
+${runner === 'python' ? `
+// Python 代码模式运行时 (Skulpt)
+var _pyReady = false;
+function _initSkulpt() {
+  if (typeof Sk === 'undefined') { log('Skulpt 未加载, 请检查网络连接'); return false; }
+  Sk.configure({
+    output: function(t) { log(t.replace(/\\n$/, '')); },
+    read: function(x) { if (Sk.builtinFiles === undefined || Sk.builtinFiles['files'][x] === undefined) throw 'File not found'; return Sk.builtinFiles['files'][x]; },
+    __future__: Sk.python3
+  });
+  // 注入游戏 API 到 Python 全局
+  var apiDefs = '';
+  var apiNames = ['set_sprite','sprite_name','sprite_count','get_x','get_y','get_direction','get_size',
+    'set_x','set_y','change_x','change_y','goto_xy','move','turn_right','turn_left','point_in_direction',
+    'bounce_edge','point_towards_xy','show','hide','set_size','change_size','say','clear_say','say_for',
+    'think','stage_width','stage_height','mouse_x','mouse_y','mouse_down','key_pressed','touching_edge',
+    'touching_sprite','distance_to','sprite_x','sprite_y','timer_now','random_int','get_var','set_var',
+    'change_var','has_var','stop_all','math_abs','math_floor','math_ceil','math_round','math_sqrt',
+    'math_min','math_max','math_pi','math_sin','math_cos','math_tan','str_len','str_upper','str_lower','str_trim'];
+  apiNames.forEach(function(n) {
+    Sk.builtins[n] = new Sk.builtin.func(function() {
+      var args = Array.prototype.slice.call(arguments).map(function(a) { return Sk.ffi.remapToJs(a); });
+      return Sk.ffi.remapToPy(window[n].apply(null, args));
+    });
+  });
+  _pyReady = true;
+  return true;
+}
+function _execPyFrame() {
+  if (!running || !_pyReady) return;
+  Object.keys(_codeMap).forEach(function(name) {
+    var idx = sprites.findIndex(function(s){return s.name===name;});
+    if (idx < 0) return;
+    _activeSpriteIdx = idx;
+    try { Sk.misceval.asyncToPromise(function(){ return Sk.importMainWithBody('<'+name+'>', false, _codeMap[name], true); }); }
+    catch(e) { log('[Py] ' + name + ': ' + (e.tp\$str ? Sk.ffi.remapToJs(e.tp\$str()) : e.message)); }
+  });
+}
+function startRun() {
+  if (running) return;
+  running = true; globalVars = {}; output = []; outputEl.textContent = ''; _startTime = Date.now();
+  if (!_pyReady) { if (!_initSkulpt()) { running = false; return; } }
+  _frameTimer = setInterval(_execPyFrame, ${interval});
+}
+function stopRun() { running = false; if (_frameTimer) { clearInterval(_frameTimer); _frameTimer = null; } }
+` : ''}
+${albBranchCode}
+${autoRun ? 'setTimeout(function(){ startRun(); }, 500);' : ''}
+<\/script>
+</body>
+</html>`;
+  }
+
   /** 收集导出数据所需的公共数据 */
   function _collectExportData() {
     var projectName = EditorState.projectName || 'Objector';
@@ -1435,16 +1898,28 @@ function stopRun() {
   /** 导出 HTML 文件 */
   async function exportProject(exportSettings) {
     console.log('[HTML导出] 开始导出...');
-    var data = _collectExportData();
-    var projectName = data.projectName;
-    var _blockCount = Object.keys(data.blocksData).length;
-    console.log('[HTML导出] 项目名:', projectName, '积木数:', _blockCount);
-    if (!data.blocksData || _blockCount === 0) {
-      alert(i18n.isEnglish() ? 'No blocks to export' : '没有积木可以导出'); return;
+    var projectName = (typeof EditorState !== 'undefined' && EditorState.projectName) ? EditorState.projectName : 'Objector';
+    var html;
+    if (_isCodeMode()) {
+      // 代码模式: 内置解释器 + 角色代码
+      var codeData = await _collectCodeModeData();
+      console.log('[HTML导出] 代码模式, 语言:', codeData.runner, '角色数:', Object.keys(codeData.codeMap).length);
+      if (Object.keys(codeData.codeMap).length === 0) {
+        alert(i18n.isEnglish() ? 'No code to export' : '没有代码可以导出'); return;
+      }
+      html = generateCodeModeHTML(projectName, codeData.spritesData, codeData.runner, codeData.codeMap, exportSettings, codeData.albSource);
+    } else {
+      // 积木模式
+      var data = _collectExportData();
+      projectName = data.projectName;
+      var _blockCount = Object.keys(data.blocksData).length;
+      console.log('[HTML导出] 项目名:', projectName, '积木数:', _blockCount);
+      if (!data.blocksData || _blockCount === 0) {
+        alert(i18n.isEnglish() ? 'No blocks to export' : '没有积木可以导出'); return;
+      }
+      html = generateHTML(projectName, data.blocksData, data.spritesData, data.extExecs, data.extJsSrcs, exportSettings);
     }
-    console.log('[HTML导出] 生成HTML...');
-    var html = generateHTML(projectName, data.blocksData, data.spritesData, data.extExecs, data.extJsSrcs, exportSettings);
-    console.log('[HTML导出] HTML长度:', html.length);
+    console.log('[HTML导出] 生成HTML...', 'HTML长度:', html.length);
 
     if (window.api && window.api.saveFileDialog && !window.api._isWebShim) {
       console.log('[HTML\u5bfc\u51fa] Electron\u6a21\u5f0f');
@@ -1476,15 +1951,27 @@ function stopRun() {
   /** 导出为 ZIP 可执行包 */
   async function exportAsExe(exportSettings) {
     console.log('[EXE导出] 开始...');
-    var data = _collectExportData();
-    var projectName = data.projectName;
+    var projectName = (typeof EditorState !== 'undefined' && EditorState.projectName) ? EditorState.projectName : 'Objector';
     var gameTitle = (exportSettings && exportSettings.title) || projectName;
-    var _blockCount = Object.keys(data.blocksData).length;
-    if (!data.blocksData || _blockCount === 0) {
-      alert(i18n.isEnglish() ? 'No blocks to export' : '没有积木可以导出'); return;
+    var html;
+    if (_isCodeMode()) {
+      var codeData = await _collectCodeModeData();
+      console.log('[EXE导出] 代码模式, 语言:', codeData.runner);
+      if (Object.keys(codeData.codeMap).length === 0) {
+        alert(i18n.isEnglish() ? 'No code to export' : '没有代码可以导出'); return;
+      }
+      html = generateCodeModeHTML(projectName, codeData.spritesData, codeData.runner, codeData.codeMap, exportSettings, codeData.albSource);
+    } else {
+      var data = _collectExportData();
+      projectName = data.projectName;
+      gameTitle = (exportSettings && exportSettings.title) || projectName;
+      var _blockCount = Object.keys(data.blocksData).length;
+      if (!data.blocksData || _blockCount === 0) {
+        alert(i18n.isEnglish() ? 'No blocks to export' : '没有积木可以导出'); return;
+      }
+      html = generateHTML(projectName, data.blocksData, data.spritesData, data.extExecs, data.extJsSrcs, exportSettings);
     }
-    console.log('[EXE导出] 生成HTML...');
-    var html = generateHTML(projectName, data.blocksData, data.spritesData, data.extExecs, data.extJsSrcs, exportSettings);
+    console.log('[EXE导出] 生成HTML...', 'HTML长度:', html.length);
     var safeName = projectName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_\-]/g, '_');
     var targetPlatform = (exportSettings && exportSettings.targetPlatform) || 'win32';
     var packageType = (exportSettings && exportSettings.packageType) || 'zip';

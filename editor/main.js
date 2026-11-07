@@ -1227,6 +1227,61 @@ ipcMain.on('js-editor-minimize', (_e) => {
   }
 });
 
+// ========== 精灵脚本编辑器窗口（积木 + JS） ==========
+let _sseWin = null;
+let _sseData = null;
+let _sseSender = null;
+
+ipcMain.handle('open-sprite-script-editor', async (_e, data) => {
+  // 关闭已有窗口
+  if (_sseWin && !_sseWin.isDestroyed()) {
+    _sseWin.close();
+  }
+  _sseData = data;  // { spriteIdx, sceneName, spriteName, blocks, jsCode }
+  _sseSender = _e.sender;
+
+  const parentWin = BrowserWindow.fromWebContents(_e.sender);
+  _sseWin = new BrowserWindow({
+    width: 960,
+    height: 680,
+    title: '脚本编辑器 - ' + (data.spriteName || '精灵'),
+    icon: APP_ICON,
+    backgroundColor: '#1e1e2e',
+    frame: false,
+    parent: null,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  _sseWin.loadFile(path.join(__dirname, 'sprite-script-editor.html'));
+
+  _sseWin.on('closed', () => {
+    _sseWin = null;
+    _sseData = null;
+  });
+
+  return { ok: true };
+});
+
+// 精灵脚本编辑器就绪，发送初始化数据
+ipcMain.on('sse-ready', (_e) => {
+  if (_sseWin && _sseData && _sseWin.webContents === _e.sender) {
+    _sseWin.webContents.send('sse-init', _sseData);
+  }
+});
+
+// 精灵脚本编辑器保存，转发到主编辑器
+ipcMain.on('sse-save', (_e, data) => {
+  if (_sseSender && !_sseSender.isDestroyed()) {
+    _sseSender.send('sse-code-updated', data);
+  }
+});
+
 // ========== AI 助手窗口 ==========
 let aiWindow = null;
 let _aiAbortController = null;

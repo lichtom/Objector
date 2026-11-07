@@ -8,6 +8,8 @@ const StageManager = (function () {
   let _executingIdx = -1;   // 执行时的目标精灵（不影响 _activeIdx）
   const STAGE_W = 480, STAGE_H = 360;
   let _onActiveSpriteCb = null; // 编辑器选择角色时的回调（代码模式按角色切换代码）
+  let _onSpriteRenameCbs = [];  // 角色重命名回调列表（代码模式迁移代码存储）
+  let _onSpriteDeleteCbs = [];  // 角色删除回调列表（代码模式清理代码存储）
 
   /** 通知监听者：编辑器当前选中的角色发生变化（执行期间不触发） */
   function _notifyActiveSpriteChange() {
@@ -17,6 +19,55 @@ const StageManager = (function () {
 
   /** 注册角色选择监听（传 null 取消） */
   function onActiveSpriteChange(fn) { _onActiveSpriteCb = typeof fn === 'function' ? fn : null; }
+
+  /** 注册角色重命名回调（代码模式用于迁移 _codeScripts 键名和文件） */
+  function onSpriteRename(fn) {
+    if (typeof fn === 'function' && _onSpriteRenameCbs.indexOf(fn) < 0) _onSpriteRenameCbs.push(fn);
+  }
+
+  /** 注册角色删除回调（代码模式用于清理 _codeScripts 和文件） */
+  function onSpriteDelete(fn) {
+    if (typeof fn === 'function' && _onSpriteDeleteCbs.indexOf(fn) < 0) _onSpriteDeleteCbs.push(fn);
+  }
+
+  /** 通知所有监听者：角色已重命名 */
+  function _notifySpriteRename(idx, oldName, newName) {
+    _onSpriteRenameCbs.forEach(cb => {
+      try { cb(idx, oldName, newName); } catch (e) { console.warn('[StageManager] rename 回调错误:', e); }
+    });
+  }
+
+  /** 通知所有监听者：角色已删除 */
+  function _notifySpriteDelete(idx, name) {
+    _onSpriteDeleteCbs.forEach(cb => {
+      try { cb(idx, name); } catch (e) { console.warn('[StageManager] delete 回调错误:', e); }
+    });
+  }
+
+  /** 检查角色名是否已存在 */
+  function hasSpriteName(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return false;
+    return _sprites.some(s => s.name === trimmed);
+  }
+
+  /** 统一角色重命名入口：更新名称 → 刷新列表 → 通知回调 */
+  function renameSprite(idx, newName) {
+    const s = _sprites[idx];
+    if (!s || s.isStage) return false;
+    const trimmed = String(newName || '').trim();
+    if (!trimmed || trimmed === s.name) return false;
+    // 检查重名
+    if (hasSpriteName(trimmed)) {
+      alert('角色名 "' + trimmed + '" 已存在，请使用其他名称');
+      return false;
+    }
+    const oldName = s.name;
+    s.name = trimmed;
+    renderSpriteList();
+    _notifySpriteRename(idx, oldName, trimmed);
+    return true;
+  }
 
   function init() {
     console.log('[StageManager] init() called');
@@ -100,6 +151,7 @@ const StageManager = (function () {
     if (!_isExecuting && typeof EditorState !== 'undefined') {
       _sprites[_activeIdx].blocks = { ...(EditorState.blocks || {}) };
     }
+    const deletedName = _sprites[idx].name;
     _sprites.splice(idx, 1);
     // 调整 activeIdx
     if (_activeIdx >= _sprites.length) _activeIdx = _sprites.length - 1;
@@ -110,6 +162,7 @@ const StageManager = (function () {
     }
     renderSpriteList();
     _notifyActiveSpriteChange();
+    _notifySpriteDelete(idx, deletedName);  // 通知代码模式清理
     return true;
   }
 
@@ -147,8 +200,7 @@ const StageManager = (function () {
         if (s.isStage) return;  // 舞台精灵不可重命名
         const newName = await showCustomPrompt('重命名精灵:', s.name);
         if (newName && newName.trim()) {
-          s.name = newName.trim();
-          renderSpriteList();
+          renameSprite(i, newName);
         }
       });
       // 右键菜单
@@ -516,11 +568,9 @@ const StageManager = (function () {
     if (typeof SceneGraph === 'undefined') return;
     const spriteNodes = SceneGraph.getSprites();
 
-    // 保留现有精灵的积木数据
-    const existingBlocks = {};
-    _sprites.forEach((s, i) => {
-      existingBlocks[s.name] = s.blocks || {};
-    });
+    // 高级模式：积木存储在 _spriteBlocks（按场景+索引），不依赖 sprite 对象
+    // 普通模式：保留现有精灵的积木数据（用于非场景切换的场景）
+    const isAdvanced = typeof EditorState !== 'undefined' && EditorState.projectMode === 'advanced';
 
     _sprites = [];
     spriteNodes.forEach((node, idx) => {
@@ -532,7 +582,9 @@ const StageManager = (function () {
       s.rotationStyle = p.rotationStyle || 'allAround';
       s.color = p.color || '#4C97FF';
       s.costumeName = p.costumeName || '';
-      s.blocks = existingBlocks[node.name] || node.blocks || {};
+      // 高级模式：积木从 node.blocks 读取（场景文件加载时已存入）
+      // 非高级模式：保持原有逻辑
+      s.blocks = isAdvanced ? (node.blocks || {}) : (node.blocks || {});
       // 存储节点ID关联
       s._sceneNodeId = node.id;
       if (p.costumeName && typeof CostumeManager !== 'undefined' && CostumeManager.hasCostume(p.costumeName)) {
@@ -565,7 +617,8 @@ const StageManager = (function () {
       node.properties.color = sprite.color;
       node.properties.rotationStyle = sprite.rotationStyle;
       node.properties.costumeName = sprite.costumeName || '';
-      node.blocks = sprite.blocks || {};
+      // 注意: 不在此处同步 blocks！
+      // 积木同步由 EditorApp._syncBlocksToSceneGraph() 负责，从 _spriteBlocks 写入
     });
   }
 
@@ -596,13 +649,18 @@ const StageManager = (function () {
     const items = [
       { label: '<img src="../icons/Document.svg" class="tb-icon"> 重命名', action: 'rename' },
       { label: '<img src="../icons/Document.svg" class="tb-icon"> 复制角色', action: 'clone' },
-      { divider: true },
-      { label: '📍 设置位置', action: 'setpos' },
-      { label: '🔄 设置方向', action: 'setdir' },
-      { label: '📏 设置大小', action: 'setsize' },
-      { divider: true },
-      { label: sprite.visible ? '👁️ 隐藏' : '👁️ 显示', action: 'togglevisible' },
     ];
+    // 高级模式：添加“编辑脚本”和“设置属性”选项
+    if (typeof EditorState !== 'undefined' && EditorState.projectMode === 'advanced' && !sprite.isStage) {
+      items.push({ label: '📝 编辑脚本', action: 'create-script' });
+      items.push({ label: '⚙️ 设置属性', action: 'show-properties' });
+    }
+    items.push({ divider: true });
+    items.push({ label: '📍 设置位置', action: 'setpos' });
+    items.push({ label: '🔄 设置方向', action: 'setdir' });
+    items.push({ label: '📏 设置大小', action: 'setsize' });
+    items.push({ divider: true });
+    items.push({ label: sprite.visible ? '👁️ 隐藏' : '👁️ 显示', action: 'togglevisible' });
     // 舞台精灵不显示删除选项
     if (!sprite.isStage) {
       items.push({ divider: true });
@@ -657,8 +715,7 @@ const StageManager = (function () {
           ? await showCustomPrompt('重命名角色:', sprite.name)
           : prompt('重命名角色:', sprite.name);
         if (newName && newName.trim()) {
-          sprite.name = newName.trim();
-          renderSpriteList();
+          renameSprite(idx, newName);
         }
         break;
       }
@@ -705,6 +762,23 @@ const StageManager = (function () {
         renderSpriteList();
         break;
       }
+      case 'create-script': {
+        // 高级模式：在主编辑器中间区域打开脚本标签页（积木 + JS）
+        setActiveSprite(idx);
+        if (typeof EditorApp !== 'undefined' && EditorApp.openSpriteScriptEditor) {
+          const s = _sprites[idx];
+          EditorApp.openSpriteScriptEditor(idx, s ? s.name : '精灵');
+        }
+        break;
+      }
+      case 'show-properties': {
+        // 打开属性标签页
+        if (typeof EditorApp !== 'undefined' && EditorApp.openNodeProperties) {
+          const nodeId = sprite._sceneNodeId;
+          if (nodeId) EditorApp.openNodeProperties(nodeId, sprite.name);
+        }
+        break;
+      }
       case 'delete': {
         if (_sprites.length <= 1) {
           alert('不能删除最后一个角色');
@@ -735,6 +809,7 @@ const StageManager = (function () {
     getSpeed, getDistanceToPoint, getDirectionToPoint,
     getSpriteData, restoreSprites, getAllBlocks, getSpriteCount, setExecuting,
     onActiveSpriteChange, notifyActiveSpriteChange: _notifyActiveSpriteChange,
+    onSpriteRename, renameSprite, onSpriteDelete, hasSpriteName,
     // SceneGraph 适配
     syncFromSceneGraph, syncToSceneGraph, addSpriteAdvanced,
     STAGE_W, STAGE_H,

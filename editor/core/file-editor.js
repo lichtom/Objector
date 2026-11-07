@@ -1,14 +1,45 @@
 /**
  * 文件编辑器模块 - 管理扩展文件的新建/编辑/保存/加载
+ * 使用 CodeMirror 提供语法高亮
  */
 const FileEditor = (function () {
   let currentFile = null;
   let files = [];
+  let _cmEditor = null;  // CodeMirror 实例
 
   /** 获取 extensions 目录路径 */
   function getExtensionsDir() {
     if (!EditorState.projectPath) return null;
     return EditorState.projectPath + '/extensions';
+  }
+
+  /** 根据文件名获取 CodeMirror mode */
+  function _getCmMode(fname) {
+    if (!fname) return 'javascript';
+    if (fname.endsWith('.py')) return 'python';
+    if (fname.endsWith('.json')) return { name: 'javascript', json: true };
+    return 'javascript';
+  }
+
+  /** 获取编辑器内容 */
+  function _getEditorContent() {
+    if (_cmEditor) return _cmEditor.getValue();
+    const fallback = document.getElementById('file-editor-fallback');
+    if (fallback) return fallback.value;
+    return '';
+  }
+
+  /** 设置编辑器内容并切换语法模式 */
+  function _setEditorContent(content, fname) {
+    if (_cmEditor) {
+      _cmEditor.setOption('mode', _getCmMode(fname));
+      _cmEditor.setValue(content || '');
+      // 延迟 refresh 确保 CodeMirror 正确渲染
+      setTimeout(() => _cmEditor && _cmEditor.refresh(), 50);
+    } else {
+      const fallback = document.getElementById('file-editor-fallback');
+      if (fallback) fallback.value = content || '';
+    }
   }
 
   /** 刷新文件列表 */
@@ -56,7 +87,7 @@ const FileEditor = (function () {
     if (content === null) return;
 
     currentFile = fname;
-    document.getElementById('file-editor-area').value = content;
+    _setEditorContent(content, fname);
     refreshFileList();
   }
 
@@ -153,7 +184,7 @@ const FileEditor = (function () {
     }
 
     currentFile = fname;
-    document.getElementById('file-editor-area').value = content;
+    _setEditorContent(content, fname);
     document.getElementById('status-text').textContent = (i18n.isEnglish() ? 'File created: ' : '文件已创建: ') + fname;
     await refreshFileList();
 
@@ -172,7 +203,7 @@ const FileEditor = (function () {
     const dir = getExtensionsDir();
     if (!dir) return;
 
-    const content = document.getElementById('file-editor-area').value;
+    const content = _getEditorContent();
     await window.api.writeFile(dir + '/' + currentFile, content);
     document.getElementById('status-text').textContent = (i18n.isEnglish() ? 'File saved: ' : '文件已保存: ') + currentFile;
     setTimeout(() => {
@@ -190,7 +221,7 @@ const FileEditor = (function () {
     await window.api.deleteFile(dir + '/' + fname);
     if (currentFile === fname) {
       currentFile = null;
-      document.getElementById('file-editor-area').value = '';
+      _setEditorContent('', null);
     }
     await refreshFileList();
   }
@@ -218,135 +249,6 @@ const FileEditor = (function () {
     setTimeout(() => {
       document.getElementById('status-text').textContent = i18n.t('status.ready');
     }, 2000);
-  }
-
- /** 为 textarea 绑定编辑器快捷键（Tab缩进/自动缩进/括号配对/Ctrl+S） */
-  function bindEditorKeys() {
-    const ta = document.getElementById('file-editor-area');
-    if (!ta || ta._keysBound) return;
-    ta._keysBound = true;
-
-    const INDENT = '    '; // 4 spaces
-    const PAIRS = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
-    const CLOSERS = new Set([')', ']', '}', '"', "'", '`']);
-
-    // ── Tab 防讧：三层保护确保 Tab 始终插入 4 空格 ───────────────
-    // 第1层: capture 阶段 preventDefault 阻止浏览器默认焦点跳转
-    // 第2层: textarea keydown 正常插入空格并清除 _tabNotHandled 标记
-    // 第3层: capture 中的 setTimeout(16ms) 兜底 —
-    //         若 textarea keydown 未执行（浏览器拦截了事件），
-    //         _tabNotHandled 仍为 true 且焦点已丢失 → 恢复焦点并补插
-    let _tabNotHandled = false;
-    let _tabCursorPos = 0;
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Tab' && document.activeElement === ta) {
-        e.preventDefault();
-        _tabNotHandled = true;
-        _tabCursorPos = ta.selectionStart;
-        // 延迟检查：给 textarea keydown 足够时间执行
-        // 如果 textarea keydown 执行了，它会将 _tabNotHandled 设为 false
-        setTimeout(function () {
-          if (_tabNotHandled && document.activeElement !== ta) {
-            // 焦点被浏览器抢走了，textarea keydown 没有执行
-            _tabNotHandled = false;
-            const pos = _tabCursorPos;
-            const v = ta.value;
-            ta.value = v.slice(0, pos) + INDENT + v.slice(pos);
-            ta.selectionStart = ta.selectionEnd = pos + 4;
-            ta.focus();
-          }
-          _tabNotHandled = false;
-        }, 16);
-      }
-    }, true); // ← capture phase
-
-    ta.addEventListener('keydown', function (e) {
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const val = ta.value;
-
-      // ── Tab / Shift+Tab ──────────────────────────────────────
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        _tabNotHandled = false; // keydown 执行了，清除兜底标记
-        if (start === end && !e.shiftKey) {
-          // 无选区：直接插入 4 空格
-          ta.value = val.slice(0, start) + INDENT + val.slice(end);
-          ta.selectionStart = ta.selectionEnd = start + 4;
-        } else {
-          // 有选区或 Shift+Tab：按行缩进/取消缩进
-          const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-          const block = val.slice(lineStart, end);
-          let newBlock;
-          if (e.shiftKey) {
-            newBlock = block.replace(/^( {1,4})/gm, '');
-          } else {
-            newBlock = block.replace(/^/gm, INDENT);
-          }
-          ta.value = val.slice(0, lineStart) + newBlock + val.slice(end);
-          ta.selectionStart = lineStart;
-          ta.selectionEnd = lineStart + newBlock.length;
-        }
-        return;
-      }
-
-      // ── Enter 自动缩进 ───────────────────────────────────────
-      if (e.key === 'Enter') {
-        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-        const currentLine = val.slice(lineStart, start);
-        const leadingWS = (currentLine.match(/^(\s*)/) || ['',''])[1];
-        // 如果当前行以 { ( [ 结尾，增加一级缩进
-        const lastChar = currentLine.trimEnd().slice(-1);
-        const extra = (lastChar === '{' || lastChar === '(' || lastChar === '[') ? INDENT : '';
-        if (leadingWS || extra) {
-          e.preventDefault();
-          const insert = '\n' + leadingWS + extra;
-          ta.value = val.slice(0, start) + insert + val.slice(end);
-          ta.selectionStart = ta.selectionEnd = start + insert.length;
-        }
-        return;
-      }
-
-      // ── Ctrl/Cmd + S 保存 ───────────────────────────────────
-      if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        saveFile();
-        return;
-      }
-
-      // ── 自动配对括号/引号 ────────────────────────────────────
-      if (PAIRS[e.key] && start === end) {
-        // 若下一个字符已经是同类型闭符号，则跳过插入（仅引号适用）
-        if (CLOSERS.has(e.key) && val[start] === e.key) {
-          e.preventDefault();
-          ta.selectionStart = ta.selectionEnd = start + 1;
-          return;
-        }
-        e.preventDefault();
-        const close = PAIRS[e.key];
-        ta.value = val.slice(0, start) + e.key + close + val.slice(end);
-        ta.selectionStart = ta.selectionEnd = start + 1;
-        return;
-      }
-
-      // ── 跳过闭符号（光标紧跟在闭符号前时按闭符号直接跳过）─────
-      if (CLOSERS.has(e.key) && val[start] === e.key && start === end) {
-        e.preventDefault();
-        ta.selectionStart = ta.selectionEnd = start + 1;
-        return;
-      }
-
-      // ── Backspace 删除配对（光标在两配对符号中间时同时删除两个）
-      if (e.key === 'Backspace' && start === end && start > 0) {
-        const before = val[start - 1];
-        const after = val[start];
-        if (PAIRS[before] === after) {
-          e.preventDefault();
-          ta.value = val.slice(0, start - 1) + val.slice(start + 1);
-          ta.selectionStart = ta.selectionEnd = start - 1;
-        }
-      }
-    });
   }
 
   /** 生成 Python 扩展文件模板（先 def 执行函数, 最后 register_extension） */
@@ -392,18 +294,106 @@ const FileEditor = (function () {
     ].join('\n');
   }
 
+  /** 初始化 CodeMirror 编辑器 */
+  function _initCmEditor() {
+    const container = document.getElementById('ext-file-cm-editor');
+    if (!container || _cmEditor) return;
+    if (typeof CodeMirror === 'undefined') {
+      console.warn('[FileEditor] CodeMirror 未加载，回退到 textarea');
+      // 回退：创建带样式的 textarea
+      if (!container.querySelector('textarea')) {
+        const ta = document.createElement('textarea');
+        ta.id = 'file-editor-fallback';
+        ta.placeholder = '选择或新建文件开始编辑...';
+        ta.spellcheck = false;
+        ta.style.cssText = 'width:100%;height:100%;background:#212121;color:#eeffff;border:none;resize:none;padding:12px;font-family:Cascadia Code,Consolas,monospace;font-size:13px;line-height:1.6;outline:none;tab-size:4;';
+        container.appendChild(ta);
+      }
+      return;
+    }
+
+    try {
+      _cmEditor = CodeMirror(container, {
+        mode: 'javascript',
+        theme: 'material-darker',
+        lineNumbers: true,
+        indentUnit: 4,
+        tabSize: 4,
+        indentWithTabs: false,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        extraKeys: {
+          'Ctrl-S': () => saveFile(),
+          'Cmd-S': () => saveFile(),
+          'Tab': (cm) => {
+            if (cm.somethingSelected()) {
+              cm.indentSelection('add');
+            } else {
+              cm.replaceSelection('    ', 'end');
+            }
+          },
+          'Shift-Tab': (cm) => cm.indentSelection('subtract'),
+        },
+        value: '// 选择或新建文件开始编辑...\n',
+      });
+      console.log('[FileEditor] CodeMirror 初始化成功');
+    } catch(e) {
+      console.error('[FileEditor] CodeMirror 初始化失败:', e);
+    }
+  }
+
   /** 初始化（绑定按钮事件） */
   function init() {
     const newBtn = document.getElementById('btn-file-editor-new');
     const saveBtn = document.getElementById('btn-save-file');
     const loadBtn = document.getElementById('btn-load-test');
+    const closeBtn = document.getElementById('btn-ext-file-editor-close');
+    const openBtn = document.getElementById('btn-ext-file-editor');
 
     if (newBtn) newBtn.addEventListener('click', createFile);
     if (saveBtn) saveBtn.addEventListener('click', saveFile);
     if (loadBtn) loadBtn.addEventListener('click', loadTest);
-
-    bindEditorKeys();
+    if (closeBtn) closeBtn.addEventListener('click', hideOverlay);
+    if (openBtn) openBtn.addEventListener('click', toggleOverlay);
   }
 
-  return { init, refreshFileList, openFile, createFile, saveFile, pyExtTemplate };
+  /** 切换文件编辑器覆盖层（再点一下关闭） */
+  function toggleOverlay() {
+    const overlay = document.getElementById('ext-file-editor-overlay');
+    if (!overlay) return;
+    if (overlay.classList.contains('hidden')) {
+      showOverlay();
+    } else {
+      hideOverlay();
+    }
+  }
+
+  /** 显示文件编辑器覆盖层 */
+  function showOverlay() {
+    const overlay = document.getElementById('ext-file-editor-overlay');
+    if (overlay) {
+      overlay.classList.remove('hidden');
+      // 按钮高亮
+      const btn = document.getElementById('btn-ext-file-editor');
+      if (btn) btn.classList.add('tb-btn-active');
+      // 延迟初始化 CodeMirror（确保容器可见后再创建）
+      setTimeout(() => {
+        _initCmEditor();
+        if (_cmEditor) _cmEditor.refresh();
+        refreshFileList();
+      }, 50);
+    }
+  }
+
+  /** 隐藏文件编辑器覆盖层 */
+  function hideOverlay() {
+    const overlay = document.getElementById('ext-file-editor-overlay');
+    if (overlay) {
+      overlay.classList.add('hidden');
+      const btn = document.getElementById('btn-ext-file-editor');
+      if (btn) btn.classList.remove('tb-btn-active');
+    }
+  }
+
+  return { init, refreshFileList, openFile, createFile, saveFile, pyExtTemplate, showOverlay, hideOverlay, toggleOverlay };
 })();

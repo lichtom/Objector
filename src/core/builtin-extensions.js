@@ -238,4 +238,69 @@
     },
   });
 
+  // ========== 5. 文件操作 (高级模式专用) ==========
+  ExtensionManager.registerAvailable({
+    id: 'ext_file',
+    name: '文件',
+    color: '#A78BFA',
+    blocks: [
+      {
+        type: 'ext_file_read', label: '读取文件 {path}', shape: 'reporter',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: 'data.txt' }],
+      },
+      {
+        type: 'ext_file_write', label: '写入文件 {path} 内容 {content}', shape: 'stack',
+        ports: { flowIn: true, flowOut: true },
+        params: [{ name: 'path', type: 'string', default: 'data.txt' }, { name: 'content', type: 'string', default: '' }],
+      },
+      {
+        type: 'ext_file_append', label: '追加文件 {path} 内容 {content}', shape: 'stack',
+        ports: { flowIn: true, flowOut: true },
+        params: [{ name: 'path', type: 'string', default: 'data.txt' }, { name: 'content', type: 'string', default: '' }],
+      },
+      {
+        type: 'ext_file_list', label: '列出文件夹 {path}', shape: 'reporter',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: '.' }],
+      },
+      {
+        type: 'ext_file_exists', label: '文件 {path} 存在', shape: 'boolean',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: 'data.txt' }],
+      },
+      {
+        type: 'ext_file_delete', label: '删除文件 {path}', shape: 'stack',
+        ports: { flowIn: true, flowOut: true },
+        params: [{ name: 'path', type: 'string', default: 'data.txt' }],
+      },
+      {
+        type: 'ext_file_run_js', label: '运行 JS 文件 {path}', shape: 'reporter',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: 'script.js' }],
+      },
+      {
+        type: 'ext_file_run_alb', label: '运行 ALB 文件 {path}', shape: 'reporter',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: 'script.alb' }],
+      },
+      {
+        type: 'ext_file_run_py', label: '运行 Python 文件 {path}', shape: 'reporter',
+        ports: { flowIn: false, flowOut: false },
+        params: [{ name: 'path', type: 'string', default: 'script.py' }],
+      },
+    ],
+    executors: {
+      ext_file_read: 'function(params) { var path = params.path; if (!window.api || !window.api.readFile) return "[文件API不可用]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(content) { return content || ""; }).catch(function(e) { return "[读取失败: " + e.message + "]"; }); }',
+      ext_file_write: 'function(params) { var path = params.path; var content = params.content; if (!window.api || !window.api.writeFile) return "[文件API不可用]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.writeFile(fullPath, content).then(function() { return true; }).catch(function(e) { return false; }); }',
+      ext_file_append: 'function(params) { var path = params.path; var content = params.content; if (!window.api || !window.api.readFile || !window.api.writeFile) return "[文件API不可用]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(existing) { return window.api.writeFile(fullPath, (existing || "") + content); }).then(function() { return true; }).catch(function(e) { return false; }); }',
+      ext_file_list: 'function(params) { var path = params.path; if (!window.api || !window.api.listDir) return "[文件API不可用]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = (path === ".") ? projectPath : projectPath + "/" + path; return window.api.listDir(fullPath).then(function(items) { return items || []; }).catch(function(e) { return "[列出失败: " + e.message + "]"; }); }',
+      ext_file_exists: 'function(params) { var path = params.path; if (!window.api || !window.api.readFile) return false; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(content) { return content !== null; }).catch(function() { return false; }); }',
+      ext_file_delete: 'function(params) { var path = params.path; if (!window.api || !window.api.deleteFile) return false; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.deleteFile(fullPath).then(function() { return true; }).catch(function() { return false; }); }',
+      ext_file_run_js: 'function(params) { var path = params.path; if (!window.api || !window.api.readFile) return "[文件API不可用]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(code) { if (!code) return "[文件不存在或为空]"; try { var result = new Function("sprite", "globalVars", "StageManager", code)(typeof sprite !== "undefined" ? sprite : null, typeof globalVars !== "undefined" ? globalVars : {}, typeof StageManager !== "undefined" ? StageManager : null); return result !== undefined ? result : "[执行完成]"; } catch(e) { return "[执行错误: " + e.message + "]"; } }).catch(function(e) { return "[读取失败: " + e.message + "]"; }); }',
+      ext_file_run_alb: 'function(params) { var path = params.path; if (!window.api || !window.api.readFile) return "[文件API不可用]"; if (typeof ALB === "undefined") return "[ALB解释器未加载]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(code) { if (!code) return "[文件不存在或为空]"; try { var result = ALB.run(code); return result.output ? result.output.join("\\n") : (result.result !== undefined ? result.result : "[执行完成]"); } catch(e) { return "[执行错误: " + e.message + "]"; } }).catch(function(e) { return "[读取失败: " + e.message + "]"; }); }',
+      ext_file_run_py: 'function(params) { var path = params.path; if (!window.api || !window.api.readFile) return "[文件API不可用]"; if (typeof Sk === "undefined") return "[Skulpt未加载]"; var projectPath = (typeof EditorState !== "undefined" && EditorState.projectPath) ? EditorState.projectPath : "."; var fullPath = projectPath + "/" + path; return window.api.readFile(fullPath).then(function(code) { if (!code) return "[文件不存在或为空]"; try { var output = []; Sk.configure({ output: function(t) { output.push(t); }, read: function(x) { throw "File not found"; }, __future__: Sk.python3 }); Sk.misceval.asyncToPromise(function() { return Sk.importMainWithBody("<python_file>", false, code, true); }).then(function() {}, function(err) { output.push("[Python错误] " + err); }); return output.join("\\n") || "[执行完成]"; } catch(e) { return "[执行错误: " + e.message + "]"; } }).catch(function(e) { return "[读取失败: " + e.message + "]"; }); }',
+    },
+  });
+
 })();

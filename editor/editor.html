@@ -27,6 +27,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.min.css">
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/closebrackets.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
@@ -131,6 +133,7 @@
         <button id="btn-asset-manager" class="tb-btn" style="font-size:11px;" title="素材管理"><img src="../icons/Run.svg" class="tb-icon"> 素材</button>
         <button id="btn-ai-assistant" class="tb-btn" style="font-size:11px;" title="AI 辅助编程"><img src="../icons/Develop.svg" class="tb-icon"> AI</button>
         <button id="btn-cmd" class="tb-btn" style="font-size:11px;" title="命令行"><img src="../icons/Develop File.svg" class="tb-icon"> 命令行</button>
+        <button id="btn-ext-file-editor" class="tb-btn hidden" style="font-size:11px;" title="扩展文件编辑器"><img src="../icons/Develop File.svg" class="tb-icon"> 文件编辑器</button>
         <span class="tb-sep"></span>
         <span id="block-count">积木: 0</span>
       </div>
@@ -170,6 +173,7 @@
           <button id="btn-zoom-in" title="放大">+</button>
           <button id="btn-zoom-reset" title="重置视图">⟳</button>
         </div>
+        <div id="canvas-trash" title="拖拽积木到此处删除"></div>
       </main>
 
       <!-- 右侧：角色面板 + 音频面板 -->
@@ -211,15 +215,30 @@
       <div id="debug-content" class="hidden" style="display:none;">
         <div id="debug-panel"></div>
       </div>
-      <div id="files-content" class="hidden" style="display:none;">
-        <div class="file-editor-toolbar">
-          <button class="tb-btn" id="btn-file-editor-new" data-i18n="fileEditor.newFile">+ 新建文件</button>
-          <button class="tb-btn" id="btn-save-file" data-i18n="fileEditor.save">💾 保存</button>
-          <button class="tb-btn" id="btn-load-test" data-i18n="fileEditor.loadTest">▶ 加载测试</button>
+
+      <!-- 扩展文件编辑器覆盖层（覆盖积木区） -->
+      <div id="ext-file-editor-overlay" class="hidden">
+        <div class="ext-file-editor-header">
+          <div class="ext-file-editor-title"><img src="../icons/Develop File.svg" class="tb-icon" style="height:14px;"> 扩展文件编辑器</div>
+          <div class="ext-file-editor-actions">
+            <button class="tb-btn tb-btn-small" id="btn-file-editor-new" data-i18n="fileEditor.newFile">+ 新建</button>
+            <button class="tb-btn tb-btn-small" id="btn-save-file" data-i18n="fileEditor.save">💾 保存</button>
+            <button class="tb-btn tb-btn-small" id="btn-load-test" data-i18n="fileEditor.loadTest">▶ 加载测试</button>
+            <span class="tb-sep"></span>
+            <button id="btn-ext-file-editor-close" class="tb-btn tb-btn-small" title="关闭编辑器">✕</button>
+          </div>
         </div>
-        <div id="file-list"></div>
-        <textarea id="file-editor-area" data-i18n-ph="fileEditor.placeholder" placeholder="选择或新建文件开始编辑..." spellcheck="false"></textarea>
+        <div class="ext-file-editor-body">
+          <div class="ext-file-editor-sidebar">
+            <div class="ext-file-editor-sidebar-title">文件列表</div>
+            <div id="file-list" class="ext-file-list"></div>
+          </div>
+          <div class="ext-file-editor-main">
+            <div id="ext-file-cm-editor"></div>
+          </div>
+        </div>
       </div>
+
     </div>
 
     <!-- 高级模式 Godot 式布局（默认隐藏） -->
@@ -248,28 +267,38 @@
         </div>
       </aside>
 
-      <!-- 中央区域：主编辑器（积木面板 + 编辑区，由 JS 移入） -->
+      <!-- 中央区域：精灵脚本标签页编辑器 -->
       <div id="advanced-center">
-        <div id="script-editor-panel">
-          <div id="script-tabs">
-            <button class="script-tab active" data-tab="blocks">积木</button>
-            <button class="script-tab" data-tab="js">JS 代码</button>
-            <div style="display:flex;gap:2px;margin-left:auto;align-items:center;">
-              <button id="btn-fs-editor" class="tb-btn tb-btn-small" title="编辑器全屏 (F11)"><img src="../icons/窗口操作图标/全屏.svg" class="tb-icon"></button>
-              <button id="btn-popout-js" class="tb-btn tb-btn-small" title="在新窗口中编辑代码"><img src="../icons/窗口操作图标/窗口化.svg" class="tb-icon"></button>
-            </div>
-          </div>
-          <div id="script-blocks-content">
-            <!-- 积木编辑器的 palette + canvas 由 JS 移入 -->
-          </div>
-          <div id="script-js-content" class="hidden">
-            <div id="js-editor"></div>
-          </div>
+        <!-- 精灵标签栏 -->
+        <div id="sprite-tab-bar">
+          <div id="sprite-tabs"></div>
+        </div>
+        <!-- 子模式切换：积木 / JS -->
+        <div id="sprite-script-tabs" class="hidden">
+          <button class="script-tab active" data-tab="blocks">积木</button>
+          <button class="script-tab" data-tab="js">JS 代码</button>
+        </div>
+        <!-- 积木编辑区（共享，切换标签时替换数据） -->
+        <div id="script-blocks-content" class="hidden">
+          <!-- palette-panel 和 editor-panel 由 JS 移入 -->
+        </div>
+        <!-- JS 代码编辑区（共享 CodeMirror，切换标签时替换内容） -->
+        <div id="script-js-content" class="hidden">
+          <div id="js-editor"></div>
+        </div>
+        <!-- 属性面板（由 Inspector 渲染到此处） -->
+        <div id="script-props-content" class="hidden">
+          <div id="tab-inspector-content"></div>
+        </div>
+        <!-- 空状态占位符 -->
+        <div id="script-placeholder">
+          <span style="font-size:48px;">📝</span>
+          <span>右键角色并选择“编辑脚本”或“设置属性”</span>
         </div>
       </div>
 
-      <!-- 右侧属性检查器 -->
-      <aside id="inspector-panel">
+      <!-- 右侧属性检查器（默认隐藏，属性通过标签页打开） -->
+      <aside id="inspector-panel" class="hidden">
         <div class="panel-header">
           <span class="panel-title">属性</span>
         </div>
@@ -381,6 +410,10 @@
         <button id="code-stop-btn" class="tb-btn tb-stop" disabled><img src="../icons/Stop.svg" class="tb-icon"> 停止</button>
         <button id="code-save-btn" class="tb-btn"><img src="../icons/Document.svg" class="tb-icon"> 保存</button>
         <button id="code-clear-btn" class="tb-btn"><img src="../icons/窗口操作图标/关闭.svg" class="tb-icon"> 清空</button>
+        <span class="tb-sep"></span>
+        <button id="code-search-btn" class="tb-btn" style="font-size:11px;" title="搜索代码 (Ctrl+F)"><img src="../icons/Develop.svg" class="tb-icon"> 搜索</button>
+        <button id="code-upload-costume-btn" class="tb-btn" style="font-size:11px;" title="上传造型"><img src="../icons/Run.svg" class="tb-icon"> 造型</button>
+        <button id="code-stage-btn" class="tb-btn" style="font-size:11px;" title="舞台窗口"><img src="../icons/Run.svg" class="tb-icon"> 舞台</button>
         <span id="code-status" class="code-status-text"></span>
       </div>
       <!-- 主体区域：代码编辑器 -->
@@ -598,6 +631,8 @@
       <div id="export-progress-detail" style="font-size:11px;color:var(--text-secondary);text-align:right;"></div>
     </div>
   </div>
+
+
 
   <!-- 触屏按键配置面板 -->
   <div id="touch-config-overlay" class="custom-prompt-overlay hidden"></div>

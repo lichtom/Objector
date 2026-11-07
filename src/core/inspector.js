@@ -185,7 +185,62 @@ const Inspector = (function () {
 
   function refresh() { if (_currentNodeId) showNode(_currentNodeId); }
 
+  /** 将节点属性渲染到指定容器（供标签页系统使用） */
+  function renderInto(container, nodeId) {
+    if (!container) return;
+    _currentNodeId = nodeId;
+    if (typeof SceneGraph === 'undefined') {
+      container.innerHTML = '<p class="inspector-hint">SceneGraph 未加载</p>';
+      return;
+    }
+    const node = SceneGraph.getNode(nodeId);
+    if (!node) {
+      container.innerHTML = '<p class="inspector-hint">节点不存在</p>';
+      return;
+    }
+    const typeInfo = SceneGraph.getNodeType(node.type);
+    container.innerHTML = `
+      <div class="inspector-group">
+        <div class="inspector-group-title">
+          <span>${typeInfo ? typeInfo.icon : '❓'} ${node.type}</span>
+        </div>
+        <div class="inspector-row">
+          <span class="inspector-label">名称</span>
+          <input class="inspector-input" data-prop="name" value="${esc(node.name)}" />
+        </div>
+        <div class="inspector-row">
+          <span class="inspector-label">可见</span>
+          <input type="checkbox" data-prop="visible" ${node.visible !== false ? 'checked' : ''} style="width:auto;" />
+        </div>
+      </div>
+      ${_renderProps(node)}
+    `;
+    _bindInputsTo(container, nodeId);
+  }
+
+  /** 将输入绑定到指定容器（供 renderInto 使用） */
+  function _bindInputsTo(container, nodeId) {
+    container.querySelectorAll('.inspector-input').forEach(input => {
+      const prop = input.dataset.prop;
+      if (!prop) return;
+      const handler = () => {
+        let value;
+        if (input.type === 'checkbox') value = input.checked;
+        else if (input.type === 'number') value = parseFloat(input.value) || 0;
+        else value = input.value;
+        if (prop === 'name') SceneGraph.renameNode(nodeId, value);
+        else if (prop === 'visible') SceneGraph.setVisible(nodeId, value);
+        else SceneGraph.updateProperty(nodeId, prop, value);
+        if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+        if (prop === 'name' && typeof SceneTree !== 'undefined') SceneTree.refresh();
+        if (typeof StageCanvas !== 'undefined') StageCanvas.render();
+      };
+      input.addEventListener('change', handler);
+      if (input.type === 'color' || input.type === 'range') input.addEventListener('input', handler);
+    });
+  }
+
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-  return { init, showNode, showSprite, refresh };
+  return { init, showNode, showSprite, refresh, renderInto };
 })();

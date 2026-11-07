@@ -41,6 +41,13 @@ contextBridge.exposeInMainWorld('api', {
   // JS 代码编辑器窗口
   openJsEditor: (data) => ipcRenderer.invoke('open-js-editor', data),
   onJsEditorCodeUpdated: (callback) => ipcRenderer.on('js-editor-code-updated', (_e, spriteIdx, code) => callback(spriteIdx, code)),
+  // 精灵脚本编辑器窗口（积木 + JS）
+  openSpriteScriptEditor: (data) => ipcRenderer.invoke('open-sprite-script-editor', data),
+  onSseCodeUpdated: (callback) => ipcRenderer.on('sse-code-updated', (_e, data) => callback(data)),
+  // SSE 子窗口内部 API
+  sseReady: () => ipcRenderer.send('sse-ready'),
+  onSseInit: (callback) => ipcRenderer.on('sse-init', (_e, data) => callback(data)),
+  sseSave: (data) => ipcRenderer.send('sse-save', data),
   // 素材管理窗口
   openAssetManager: (options) => ipcRenderer.invoke('open-asset-manager', options),
   // 右键菜单 / 命令行打开项目

@@ -924,17 +924,21 @@ const Executor = (function () {
     }
     else if (type === 'scene_save') {
       const sceneName = String(p.name);
-      if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
+      if (typeof EditorApp !== 'undefined' && EditorApp.saveCurrentSceneState) {
+        await EditorApp.saveCurrentSceneState();
+      } else if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
         await FileSystemDock.saveCurrentScene(sceneName);
-        log('已保存场景: ' + sceneName);
       }
+      log('已保存场景: ' + sceneName);
     }
     else if (type === 'scene_save_auto') {
       const curName = EditorState._currentSceneName || 'main';
-      if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
+      if (typeof EditorApp !== 'undefined' && EditorApp.saveCurrentSceneState) {
+        await EditorApp.saveCurrentSceneState();
+      } else if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
         await FileSystemDock.saveCurrentScene(curName);
-        log('已保存场景: ' + curName);
       }
+      log('已保存场景: ' + curName);
     }
     else if (type === 'scene_reload') {
       const curName = EditorState._currentSceneName || 'main';
@@ -1639,10 +1643,9 @@ const Executor = (function () {
         return;
       }
   
-      // 1. 自动保存当前场景
-      const curName = EditorState._currentSceneName || 'main';
-      if (typeof FileSystemDock !== 'undefined' && FileSystemDock.saveCurrentScene) {
-        await FileSystemDock.saveCurrentScene(curName);
+      // 1. 自动保存当前场景状态（积木 + 脚本 + 代码）
+      if (typeof EditorApp !== 'undefined' && EditorApp.saveCurrentSceneState) {
+        await EditorApp.saveCurrentSceneState();
       }
   
       // 2. 构建目标场景文件路径
@@ -1664,10 +1667,25 @@ const Executor = (function () {
         const sceneData = JSON.parse(content);
         if (typeof SceneGraph !== 'undefined' && (sceneData.rootId || sceneData.nodes)) {
           SceneGraph.fromJSON(sceneData);
-          if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
-          if (typeof SceneTree !== 'undefined') SceneTree.refresh();
           EditorState._currentSceneName = sceneName;
+          if (typeof StageManager !== 'undefined') StageManager.syncFromSceneGraph();
+          // 从场景文件加载积木到 _spriteBlocks
+          if (typeof EditorApp !== 'undefined' && EditorApp._loadBlocksFromSceneData) {
+            EditorApp._loadBlocksFromSceneData(sceneData);
+          }
+          if (typeof SceneTree !== 'undefined') SceneTree.refresh();
+
+          // 清空标签页状态（旧场景的精灵索引不再有效）
+          if (typeof EditorApp !== 'undefined' && EditorApp._clearTabsOnSceneSwitch) {
+            EditorApp._clearTabsOnSceneSwitch();
+          }
+
           log('已切换到场景: ' + sceneName);
+
+          // 3.5 加载新场景的 JS 脚本
+          if (typeof EditorApp !== 'undefined' && EditorApp.loadSceneScripts) {
+            await EditorApp.loadSceneScripts(sceneName);
+          }
   
           // 4. 重建 _runtimeBlocks（新场景的精灵和积木可能已变化）
           if (_runtimeBlocks && typeof StageManager !== 'undefined') {

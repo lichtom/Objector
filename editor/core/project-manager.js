@@ -91,19 +91,26 @@ const ProjectManager = (function () {
       alert(i18n.t('status.openProjectFirst'));
       return;
     }
+    // 高级模式：先保存当前场景状态（积木 + JS脚本 + 场景文件）
+    if (EditorState.projectMode === 'advanced' && typeof EditorApp !== 'undefined' && EditorApp.saveCurrentSceneState) {
+      await EditorApp.saveCurrentSceneState();
+    }
     // 同步当前精灵的积木
     if (typeof StageManager !== 'undefined') {
       StageManager.getSpriteData();
     }
-    // 保存所有精灵的合并积木
-    let allBlocks = {};
-    if (typeof StageManager !== 'undefined' && StageManager.getAllBlocks) {
-      allBlocks = StageManager.getAllBlocks();
-    } else {
-      allBlocks = EditorState.blocks || {};
+    // 非高级模式：保存所有精灵的合并积木到 scripts/main.json
+    // 高级模式的积木已保存在各场景文件 scenes/<sceneName>.scene.json 中
+    if (EditorState.projectMode !== 'advanced') {
+      let allBlocks = {};
+      if (typeof StageManager !== 'undefined' && StageManager.getAllBlocks) {
+        allBlocks = StageManager.getAllBlocks();
+      } else {
+        allBlocks = EditorState.blocks || {};
+      }
+      const json = Serializer.serialize(allBlocks);
+      await window.api.writeFile(EditorState.projectPath + '/scripts/main.json', json);
     }
-    const json = Serializer.serialize(allBlocks);
-    await window.api.writeFile(EditorState.projectPath + '/scripts/main.json', json);
 
     // 保存精灵数据到 project.json（贴图路径转为相对路径）
     const configStr = await window.api.readFile(EditorState.projectPath + '/project.json');
@@ -142,10 +149,8 @@ const ProjectManager = (function () {
       config.installedExtensions = ExtensionManager.getInstalledIds();
     }
 
-    // 高级模式：保存 JS 脚本和 SceneGraph
-    if (config.mode === 'advanced' && typeof EditorApp !== 'undefined' && EditorApp.getAllSpriteScripts) {
-      config.jsScripts = EditorApp.getAllSpriteScripts();
-    }
+    // 高级模式：JS 脚本已保存在场景文件夹 scripts/<sceneName>/，不再存入 project.json
+    // 保留 sceneGraph 保存（回退用）
     // 代码编程模式：保存按角色的代码（角色名 -> { python, javascript, alb }）
     // 闸门: 磁盘代码尚未恢复完成时（项目加载中途自动保存）不用内存模板覆盖已有 codeScripts
     if (config.mode && String(config.mode).indexOf('code') === 0 && typeof EditorApp !== 'undefined' && EditorApp.getAllCodeScripts
